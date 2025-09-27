@@ -221,7 +221,6 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
       
       const operations = await generateFileOperations(
           initialUserPrompt,
-          currentProjectState.chatHistory,
           currentProjectState.files,
           projectIdentifier
       );

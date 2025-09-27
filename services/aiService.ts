@@ -56,23 +56,6 @@ const buildFileContext = (existingFiles: ProjectFile[]): string => {
   return context;
 };
 
-const buildChatHistoryContext = (chatHistory: ChatMessage[]): string => {
-    if (chatHistory.length <= 1) { // only the new user prompt
-        return "";
-    }
-    // Get the last 6 messages, excluding the most recent user message which is part of the main prompt
-    const relevantHistory = chatHistory.slice(-7, -1);
-    if (relevantHistory.length === 0) {
-        return "";
-    }
-    let context = "Berikut adalah riwayat obrolan singkat untuk konteks:\n\n";
-    relevantHistory.forEach(msg => {
-        context += `${msg.role === 'user' ? 'Pengguna' : 'AI'}: ${msg.content}\n`;
-    });
-    context += "\n";
-    return context;
-}
-
 /**
  * Finds the matching closing bracket for an opening bracket at a given index.
  * Handles nested brackets and ignores brackets within string literals.
@@ -165,13 +148,12 @@ const parseOperationsResponse = (response: any): FileOperation[] => {
 
 export const generateFileOperations = async (
     userRequest: string,
-    chatHistory: ChatMessage[],
     files: ProjectFile[],
     projectIdentifier: string
 ): Promise<FileOperation[]> => {
     const systemPrompt = `Anda adalah seorang AI pengembang web otonom yang ahli. Tugas Anda adalah membantu pengguna membangun dan memodifikasi situs web standar HTML, CSS, dan JavaScript.
 
-Anda akan diberi permintaan pengguna, riwayat obrolan saat ini, dan keadaan lengkap file proyek.
+Anda akan diberi permintaan pengguna dan keadaan lengkap file proyek.
 Berdasarkan informasi ini, Anda harus menentukan operasi file yang diperlukan (CREATE, UPDATE, DELETE) untuk memenuhi permintaan tersebut.
 
 Anda HARUS merespons HANYA dengan satu larik JSON dari objek operasi file. Jangan sertakan teks lain, penjelasan, atau format markdown di luar larik JSON.
@@ -196,7 +178,6 @@ ATURAN PENTING:
 7.  **Escaping**: Pastikan semua konten dalam JSON di-escape dengan benar, terutama tanda kutip dan baris baru di dalam bidang "content".`;
 
     const prompt = `
-${buildChatHistoryContext(chatHistory)}
 ${buildFileContext(files)}
 Permintaan Pengguna: "${userRequest}"
 
