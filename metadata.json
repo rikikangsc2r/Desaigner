@@ -1,0 +1,5 @@
+{
+  "name": "Autonomous AI Web Builder",
+  "description": "An autonomous multi-tasking AI application designed to create, manage, and deploy HTML websites through a conversational interface. Users can manage projects, interact with the AI to modify files, preview the live website, and download the project files.",
+  "requestFramePermissions": []
+}
