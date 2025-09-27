@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
 import { getProject, saveProject } from '../services/projectService';
@@ -278,10 +279,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
   const handlePreview = () => {
     if (project && project.files.length > 0) {
-      const content = createPreviewContent(project.files);
-      const previewWindow = window.open('about:blank', '_blank');
-      previewWindow?.document.write(content);
-      previewWindow?.document.close();
+      const previewUrl = `/#/preview/${project.id}`;
+      window.open(previewUrl, '_blank');
     } else {
       alert('Tidak ada file untuk dipratinjau.');
     }
