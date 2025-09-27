@@ -9,22 +9,21 @@ export const createPreviewContent = (files: ProjectFile[]): string => {
 
   let content = htmlFile.content;
 
-  // Inject CSS
+  // Inject CSS using a robust regex
   const cssFiles = files.filter(f => f.path.endsWith('.css'));
   cssFiles.forEach(cssFile => {
-    const cssLink = `<link rel="stylesheet" href="${cssFile.path}">`;
+    const cssLinkRegex = new RegExp(`<link[^>]*href=["']${cssFile.path}["'][^>]*>`, "i");
     const cssTag = `<style>\n${cssFile.content}\n</style>`;
-    content = content.replace(cssLink, cssTag);
+    content = content.replace(cssLinkRegex, cssTag);
   });
 
-  // Inject JS
-  const jsFiles = files.filter(f => f.path.endsWith('.js'));
+  // Inject JS/JSX using a robust regex
+  const jsFiles = files.filter(f => f.path.endsWith('.js') || f.path.endsWith('.jsx'));
   jsFiles.forEach(jsFile => {
-    const jsScript = `<script src="${jsFile.path}"></script>`;
-    const jsTag = `<script>\n${jsFile.content}\n</script>`;
-    // Handle both defer and normal script tags
-    const jsScriptDefer = `<script src="${jsFile.path}" defer></script>`;
-    content = content.replace(jsScript, jsTag).replace(jsScriptDefer, jsTag);
+    const scriptRegex = new RegExp(`<script[^>]*src=["']${jsFile.path}["'][^>]*>\\s*<\\/script>`, "i");
+    const scriptType = jsFile.path.endsWith('.jsx') ? 'text/babel' : 'text/javascript';
+    const jsTag = `<script type="${scriptType}">\n${jsFile.content}\n<\/script>`;
+    content = content.replace(scriptRegex, jsTag);
   });
 
   return content;
