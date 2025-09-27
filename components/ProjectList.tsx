@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getProjects, saveProject, deleteProject } from '../services/projectService';
+import { getTemplateFiles, type TemplateType } from '../services/templates';
 import type { Project } from '../types';
 import { PlusIcon, TrashIcon, CodeIcon } from './Icons';
 import ConfirmModal from './ConfirmModal';
@@ -14,6 +15,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('vanilla');
 
   useEffect(() => {
     getProjects().then(projects => {
@@ -23,10 +25,13 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
 
   const handleCreateProject = async () => {
     if (newProjectName.trim() === '') return;
+
+    const templateFiles = getTemplateFiles(selectedTemplate, newProjectName.trim());
+
     const newProject: Project = {
       id: `proj_${Date.now()}`,
       name: newProjectName.trim(),
-      files: [],
+      files: templateFiles,
       chatHistory: [],
       updatedAt: Date.now(),
       currentSessionId: Math.random().toString(36).substring(2, 9),
@@ -66,19 +71,49 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
         </header>
         
         {isCreating && (
-          <div className="bg-slate-800 p-4 rounded-lg mb-6 shadow-lg">
-              <h2 className="text-lg font-semibold mb-2">Create a New Project</h2>
-              <div className="flex gap-2">
-                  <input
-                      type="text"
-                      value={newProjectName}
-                      onChange={(e) => setNewProjectName(e.target.value)}
-                      placeholder="Enter project name..."
-                      className="flex-grow bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
-                  />
-                  <button onClick={handleCreateProject} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md">Create</button>
+          <div className="bg-slate-800 p-6 rounded-lg mb-8 shadow-lg transition-all duration-300">
+              <h2 className="text-xl font-semibold mb-4">Create a New Project</h2>
+              
+              <div className="mb-4">
+                <label htmlFor="projectName" className="block text-sm font-medium text-slate-300 mb-2">Project Name</label>
+                <input
+                    id="projectName"
+                    type="text"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="e.g., My Portfolio"
+                    className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
+                    autoFocus
+                />
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-slate-300 mb-2">Select a Template</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Vanilla Template */}
+                    <button 
+                      onClick={() => setSelectedTemplate('vanilla')}
+                      className={`p-4 border-2 rounded-lg text-left transition-all ${selectedTemplate === 'vanilla' ? 'border-indigo-500 bg-indigo-900/50 ring-2 ring-indigo-500' : 'border-slate-600 hover:border-slate-500 bg-slate-700/50'}`}
+                    >
+                      <h3 className="font-bold text-lg text-slate-100">HTML, CSS, JS</h3>
+                      <p className="text-sm text-slate-400 mt-1">A classic, simple starting point for any web project.</p>
+                    </button>
+
+                    {/* React Template */}
+                    <button 
+                      onClick={() => setSelectedTemplate('react')}
+                      className={`p-4 border-2 rounded-lg text-left transition-all ${selectedTemplate === 'react' ? 'border-indigo-500 bg-indigo-900/50 ring-2 ring-indigo-500' : 'border-slate-600 hover:border-slate-500 bg-slate-700/50'}`}
+                    >
+                      <h3 className="font-bold text-lg text-slate-100">React</h3>
+                      <p className="text-sm text-slate-400 mt-1">A starter project using React and JSX via CDN.</p>
+                    </button>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
                   <button onClick={() => setIsCreating(false)} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-md">Cancel</button>
+                  <button onClick={handleCreateProject} disabled={!newProjectName.trim()} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-slate-500 disabled:cursor-not-allowed">Create Project</button>
               </div>
           </div>
         )}
