@@ -1,4 +1,4 @@
-import type { Project, ChatMessage, ProjectFile, FileOperation } from '../types';
+import type { Project, ChatMessage, ProjectFile, FileOperation, FileOperationType } from '../types';
 
 const API_URL = 'https://www.nirkyy.accesscam.org/api/ai/chatbot';
 const API_TOKEN = 'RIKI-BON4bV';
@@ -56,94 +56,69 @@ const buildFileContext = (existingFiles: ProjectFile[]): string => {
   return context;
 };
 
-/**
- * Finds the matching closing bracket for an opening bracket at a given index.
- * Handles nested brackets and ignores brackets within string literals.
- */
-const findMatchingBracket = (str: string, start: number): number => {
-    if (str[start] !== '[') return -1;
-    
-    let depth = 1;
-    let inString = false;
-    
-    for (let i = start + 1; i < str.length; i++) {
-        const char = str[i];
-        
-        if (char === '"' && str[i-1] !== '\\') {
-            inString = !inString;
-        }
-        
-        if (!inString) {
-            if (char === '[') {
-                depth++;
-            } else if (char === ']') {
-                depth--;
-            }
-        }
-        
-        if (depth === 0) {
-            return i;
-        }
-    }
-    
-    return -1; // Not found
-};
-
 const parseOperationsResponse = (response: any): FileOperation[] => {
-    let operations: any;
-
-    if (typeof response === 'string') {
-        try {
-            let jsonString = response;
-            
-            const startIndex = jsonString.indexOf('[');
-            if (startIndex === -1) {
-                throw new Error("Tidak ada larik JSON yang ditemukan dalam respons string AI.");
-            }
-            
-            const endIndex = findMatchingBracket(jsonString, startIndex);
-            if (endIndex === -1) {
-                const lastIndex = jsonString.lastIndexOf(']');
-                if (lastIndex > startIndex) {
-                     jsonString = jsonString.substring(startIndex, lastIndex + 1);
-                } else {
-                    throw new Error("Tidak dapat menemukan larik JSON yang lengkap (kurung tidak cocok).");
-                }
-            } else {
-                 jsonString = jsonString.substring(startIndex, endIndex + 1);
-            }
-
-            operations = JSON.parse(jsonString);
-
-        } catch (e) {
-            console.error("Gagal mengurai respons string AI:", e, "Teks Asli:", response);
-            throw new Error(`Gagal mengurai respons string AI: ${(e as Error).message}`);
-        }
-    } else if (Array.isArray(response)) {
-        operations = response;
-    } else {
-        const errorMsg = `Respons AI bukan string atau larik yang valid. Diterima tipe ${typeof response}.`;
+    if (typeof response !== 'string') {
+        const errorMsg = `Respons AI bukan string. Diterima tipe ${typeof response}.`;
         console.error(errorMsg, "Konten:", response);
         throw new Error(errorMsg);
     }
 
-    if (!Array.isArray(operations)) {
-        throw new Error("Data yang diurai bukan sebuah larik.");
+    try {
+        // Clean up response: remove markdown code blocks if present and trim
+        const xmlString = response.replace(/```(xml)?/g, '').trim();
+
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlString, "application/xml");
+        
+        const parserError = xmlDoc.querySelector("parsererror");
+        if (parserError) {
+            throw new Error(`Gagal mengurai XML: ${parserError.textContent}`);
+        }
+
+        const operationNodes = xmlDoc.querySelectorAll("operation");
+        const operations: FileOperation[] = [];
+
+        operationNodes.forEach((node, index) => {
+            const operationType = node.getAttribute("type") as FileOperationType;
+            const pathNode = node.querySelector("path");
+            const contentNode = node.querySelector("content");
+            const reasoningNode = node.querySelector("reasoning");
+
+            if (!operationType || !pathNode?.textContent || !reasoningNode?.textContent) {
+                throw new Error(`Operasi pada indeks ${index} kehilangan atribut atau tag yang diperlukan (type, path, reasoning).`);
+            }
+            
+            if (!['CREATE', 'UPDATE', 'DELETE'].includes(operationType)) {
+                throw new Error(`Operasi pada indeks ${index} memiliki 'type' yang tidak valid: ${operationType}`);
+            }
+
+            const op: FileOperation = {
+                operation: operationType,
+                path: pathNode.textContent.trim(),
+                reasoning: reasoningNode.textContent.trim(),
+            };
+            
+            if (operationType === 'CREATE' || operationType === 'UPDATE') {
+                // content can be empty string, so check for null/undefined
+                if (contentNode?.textContent == null) {
+                     throw new Error(`Operasi ${operationType} pada indeks ${index} ('${op.path}') memerlukan tag 'content'.`);
+                }
+                op.content = contentNode.textContent; // CDATA content is parsed as text
+            }
+            
+            operations.push(op);
+        });
+
+        if (operationNodes.length === 0 && xmlDoc.documentElement.tagName !== 'operations') {
+             throw new Error("Dokumen XML tidak valid atau kosong.");
+        }
+        
+        return operations;
+
+    } catch (e) {
+        console.error("Gagal mengurai respons XML AI:", e, "Teks Asli:", response);
+        throw new Error(`Gagal mengurai respons XML AI: ${(e as Error).message}`);
     }
-
-    operations.forEach((op: any, index: number) => {
-        if (!op.operation || !op.path || !op.reasoning) {
-            throw new Error(`Operasi pada indeks ${index} kehilangan bidang yang diperlukan (operation, path, reasoning).`);
-        }
-        if (!['CREATE', 'UPDATE', 'DELETE'].includes(op.operation)) {
-            throw new Error(`Operasi pada indeks ${index} memiliki 'operation' yang tidak valid: ${op.operation}`);
-        }
-        if ((op.operation === 'CREATE' || op.operation === 'UPDATE') && typeof op.content !== 'string') {
-             throw new Error(`Operasi ${op.operation} pada indeks ${index} ('${op.path}') memerlukan bidang 'content' string.`);
-        }
-    });
-
-    return operations as FileOperation[];
 };
 
 export const generateFileOperations = async (
@@ -156,32 +131,32 @@ export const generateFileOperations = async (
 Anda akan diberi permintaan pengguna dan keadaan lengkap file proyek.
 Berdasarkan informasi ini, Anda harus menentukan operasi file yang diperlukan (CREATE, UPDATE, DELETE) untuk memenuhi permintaan tersebut.
 
-Anda HARUS merespons HANYA dengan satu larik JSON dari objek operasi file. Jangan sertakan teks lain, penjelasan, atau format markdown di luar larik JSON.
+Anda HARUS merespons HANYA dengan satu blok XML yang valid yang berisi semua operasi file. Jangan sertakan teks lain, penjelasan, atau format markdown di luar blok XML.
 
-Larik JSON harus mengikuti struktur ini:
-[
-  {
-    "operation": "CREATE" | "UPDATE" | "DELETE",
-    "path": "path/ke/file.ext",
-    "content": "...",
-    "reasoning": "Penjelasan singkat satu kalimat mengapa operasi ini diperlukan."
-  }
-]
+Blok XML harus mengikuti struktur ini:
+<operations>
+  <operation type="CREATE|UPDATE|DELETE">
+    <path>path/to/file.ext</path>
+    <content><![CDATA[...]]></content>
+    <reasoning>Penjelasan singkat satu kalimat mengapa operasi ini diperlukan.</reasoning>
+  </operation>
+  ...
+</operations>
 
 ATURAN PENTING:
-1.  **HANYA JSON**: Seluruh respons Anda harus berupa larik JSON yang valid.
-2.  **Konten Lengkap**: Untuk CREATE dan UPDATE, berikan konten file *seluruhnya*. Jangan berikan diff atau kode parsial. Abaikan 'content' untuk DELETE.
+1.  **HANYA XML**: Seluruh respons Anda harus berupa blok XML yang valid dan tunggal, dimulai dengan <operations>.
+2.  **Konten Lengkap**: Untuk CREATE dan UPDATE, berikan konten file *seluruhnya* di dalam blok <![CDATA[...]]>. Jangan berikan diff atau kode parsial. Abaikan tag <content> untuk DELETE.
 3.  **Sederhana**: Tetap gunakan HTML, CSS, dan JS standar. Jangan gunakan kerangka kerja yang kompleks kecuali diminta secara eksplisit.
 4.  **Efisien**: Gabungkan perubahan ke dalam satu operasi jika memungkinkan. Misalnya, jika membuat file HTML baru, sertakan semua konten awalnya dalam satu operasi "CREATE".
 5.  **Konteks adalah Kunci**: Analisis file yang ada untuk memahami struktur proyek dan buat modifikasi yang cerdas. Jika sebuah file sudah ada, operasinya harus "UPDATE", bukan "CREATE".
 6.  **Path File**: Gunakan struktur file yang datar dan sederhana kecuali struktur direktori diminta secara eksplisit (mis., 'styles/main.css').
-7.  **Escaping**: Pastikan semua konten dalam JSON di-escape dengan benar, terutama tanda kutip dan baris baru di dalam bidang "content".`;
+7.  **CDATA**: Selalu bungkus konten file dalam CDATA untuk mencegah masalah penguraian XML.`;
 
     const prompt = `
 ${buildFileContext(files)}
 Permintaan Pengguna: "${userRequest}"
 
-Berdasarkan semua informasi di atas, silakan hasilkan larik JSON operasi file untuk memenuhi permintaan pengguna.
+Berdasarkan semua informasi di atas, silakan hasilkan blok XML dari operasi file untuk memenuhi permintaan pengguna.
 `;
     const response = await callAIAgent(prompt, systemPrompt, `${projectIdentifier}-ArchitectAgent`);
     return parseOperationsResponse(response);
