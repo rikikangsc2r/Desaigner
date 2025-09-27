@@ -1,7 +1,7 @@
+
 import type { Project, ChatMessage, ProjectFile, FileOperation, FileOperationType } from '../types';
 
-const API_URL = 'https://www.nirkyy.accesscam.org/api/ai/chatbot';
-const API_TOKEN = 'RIKI-BON4bV';
+const API_URL = 'https://nirkyy-testing.hf.space/api/generate';
 
 /**
  * Custom error for when the AI returns a conversational response instead of file operations.
@@ -16,24 +16,15 @@ export class AIConversationalError extends Error {
 /**
  * A generic function to call the AI API.
  */
-const callAIAgent = async (
-  prompt: string,
-  systemPrompt: string,
-  agentIdentifier: string
-): Promise<any> => {
+const callAIAgent = async (prompt: string): Promise<string> => {
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${API_TOKEN}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        user: agentIdentifier,
         prompt: prompt,
-        system: systemPrompt,
-        web: false,
-        cleardb: false,
       })
     });
 
@@ -42,13 +33,16 @@ const callAIAgent = async (
       throw new Error(`Permintaan API gagal: ${response.status} ${errorText}`);
     }
 
-    const result = await response.json();
+    const answer = await response.text();
 
-    if (!result.success || !result.data || !result.data.answer) {
-      throw new Error('Struktur respons API tidak valid');
+    if (!answer) {
+        throw new Error('Respons API kosong');
     }
+    
+    // The API might wrap the response in markdown code blocks.
+    // Let's remove them if they exist for robustness.
+    return answer.replace(/```(json|text|txt)?/g, '').trim();
 
-    return result.data.answer;
   } catch (error) {
     console.error(`Kesalahan saat memanggil AI:`, error);
     throw error;
@@ -163,7 +157,7 @@ const parseOperationsResponse = (response: any): FileOperation[] => {
 export const generateFileOperations = async (
     userRequest: string,
     files: ProjectFile[],
-    projectIdentifier: string
+    projectIdentifier: string // No longer used by the new API, but kept for signature compatibility
 ): Promise<FileOperation[]> => {
     const systemPrompt = `Anda adalah seorang AI pengembang web otonom yang ahli. Tugas Anda adalah membantu pengguna membangun dan memodifikasi situs web standar HTML, CSS, dan JavaScript.
 
@@ -191,12 +185,15 @@ ATURAN PENTING:
 7.  **Konteks adalah Kunci**: Analisis file yang ada untuk memahami struktur proyek dan buat modifikasi yang cerdas. Jika sebuah file sudah ada, operasinya harus "UPDATE", bukan "CREATE".
 8.  **Path File**: Gunakan struktur file yang datar dan sederhana kecuali struktur direktori diminta secara eksplisit (mis., 'styles/main.css').`;
 
-    const prompt = `
+    const promptContext = `
 ${buildFileContext(files)}
 Permintaan Pengguna: "${userRequest}"
 
 Berdasarkan semua informasi di atas, silakan hasilkan blok teks dari operasi file untuk memenuhi permintaan pengguna.
 `;
-    const response = await callAIAgent(prompt, systemPrompt, `${projectIdentifier}-ArchitectAgent`);
+    
+    const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
+    
+    const response = await callAIAgent(fullPrompt);
     return parseOperationsResponse(response);
 };
