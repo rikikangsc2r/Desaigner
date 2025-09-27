@@ -2,9 +2,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
 import { getProject, saveProject } from '../services/projectService';
-import { generateWebsiteCode } from '../services/aiService';
-import { createPreviewContent, createProjectZip } from '../utils/fileUtils';
-import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, PlannerIcon, ExecutorIcon, ReviewerIcon } from './Icons';
+import { generateFileOperations } from '../services/aiService';
+import { createProjectZip } from '../utils/fileUtils';
+import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon } from './Icons';
 import { TypingIndicator } from './Loader';
 import FileTree from './FileTree';
 import CodeEditor from './CodeEditor';
@@ -16,49 +16,35 @@ interface ProjectEditorProps {
 
 type MobileView = 'files' | 'editor' | 'chat';
 
-const applyOperations = (currentFiles: ProjectFile[], operations: FileOperation[]): ProjectFile[] => {
+// FIX: Updated function to use 'operation' property instead of 'type' for consistency.
+const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): ProjectFile[] => {
   let updatedFiles = [...currentFiles];
+  const { operation: opType, path, content = '' } = operation;
 
-  operations.forEach(op => {
-    switch (op.type) {
-      case 'CREATE':
-        if (updatedFiles.some(f => f.path === op.path)) {
-          updatedFiles = updatedFiles.map(f =>
-            f.path === op.path ? { ...f, content: op.content || '' } : f
-          );
-        } else {
-          updatedFiles.push({ path: op.path, content: op.content || '' });
-        }
-        break;
-      case 'UPDATE':
+  switch (opType) {
+    case 'CREATE':
+      if (updatedFiles.some(f => f.path === path)) {
         updatedFiles = updatedFiles.map(f =>
-          f.path === op.path ? { ...f, content: op.content || '' } : f
+          f.path === path ? { ...f, content } : f
         );
-        break;
-      case 'DELETE':
-        updatedFiles = updatedFiles.filter(f => f.path !== op.path);
-        break;
-      default:
-        console.warn(`Unknown operation type: ${(op as any).type}`);
-    }
-  });
-
+      } else {
+        updatedFiles.push({ path, content });
+      }
+      break;
+    case 'UPDATE':
+      updatedFiles = updatedFiles.map(f =>
+        f.path === path ? { ...f, content } : f
+      );
+      break;
+    case 'DELETE':
+      updatedFiles = updatedFiles.filter(f => f.path !== path);
+      break;
+    default:
+      console.warn(`Unknown operation type: ${opType}`);
+  }
   return updatedFiles;
 };
 
-const AgentIcon: React.FC<{ agent?: ChatMessage['agent'], className?: string }> = ({ agent, className }) => {
-    const commonClass = className || "w-6 h-6 text-indigo-400 flex-shrink-0";
-    switch (agent) {
-        case 'Perencana':
-            return <PlannerIcon className={commonClass} />;
-        case 'Pelaksana':
-            return <ExecutorIcon className={commonClass} />;
-        case 'Peninjau':
-            return <ReviewerIcon className={commonClass} />;
-        default:
-            return <BotIcon className={commonClass} />;
-    }
-};
 
 const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> = ({ chatHistory, isLoading }) => {
     const chatEndRef = useRef<HTMLDivElement>(null);
@@ -72,13 +58,10 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
                 {chatHistory.map((msg, index) => (
                     <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                         {msg.role === 'assistant' && (
-                            <div className="flex flex-col items-center gap-1 w-12 flex-shrink-0">
-                                <AgentIcon agent={msg.agent} />
-                                {msg.agent && <span className="text-xs text-slate-400 text-center">{msg.agent}</span>}
-                            </div>
+                           <BotIcon className="w-6 h-6 text-indigo-400 flex-shrink-0 mt-1" />
                         )}
                         <div className={`max-w-full lg:max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
-                            <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }}></p>
+                            <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 font-mono text-sm">$1</code>') }}></p>
                         </div>
                         {msg.role === 'user' && <UserIcon className="w-6 h-6 text-slate-400 flex-shrink-0 mt-1" />}
                     </div>
@@ -103,16 +86,26 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
   useEffect(() => {
     getProject(projectId).then(p => {
-        if (p && !p.currentSessionId) {
-            const updatedProject = {
-                ...p,
-                currentSessionId: Math.random().toString(36).substring(2, 9)
-            };
-            setProject(updatedProject);
-            saveProject(updatedProject);
+        if (p) {
+            if (!p.currentSessionId) {
+                const updatedProject = {
+                    ...p,
+                    currentSessionId: Math.random().toString(36).substring(2, 9)
+                };
+                setProject(updatedProject);
+                saveProject(updatedProject).catch(err => {
+                    console.error("Failed to save project with new session ID:", err);
+                });
+            } else {
+                setProject(p);
+            }
         } else {
-            setProject(p);
+            setError(`Project tidak ditemukan.`);
         }
+    }).catch(err => {
+        console.error("Failed to load project:", err);
+        const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
+        setError(`Gagal memuat proyek: ${errorMessage}`);
     });
   }, [projectId]);
 
@@ -158,7 +151,6 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
   }, [project, selectedFilePath, editorContent, isEditorDirty]);
 
-
   const handleSendMessage = useCallback(async () => {
     if (!userInput.trim() || !project) return;
     
@@ -169,97 +161,96 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     }
 
     const userMessage: ChatMessage = { role: 'user', content: userInput };
-    let currentProjectState: Project = {
-        ...project,
-        chatHistory: [...project.chatHistory, userMessage]
-    };
-    
-    setProject(currentProjectState);
     const initialUserPrompt = userInput;
     setUserInput('');
     setIsLoading(true);
     setError(null);
+    
+    // Use a function to get the latest project state for the AI call
+    let currentProjectState = project;
 
-    let continueLoop = true;
-    let loopPrompt = initialUserPrompt;
+    // Add user message to chat and save
+    setProject(p => {
+        const newProject = { ...p!, chatHistory: [...p!.chatHistory, userMessage] };
+        currentProjectState = newProject;
+        saveProject(newProject);
+        return newProject;
+    });
+    
     const projectIdentifier = `${project.name.replace(/\s+/g, '_')}-${project.currentSessionId}`;
 
-    while (continueLoop) {
-        try {
-            const aiResponse = await generateWebsiteCode(loopPrompt, currentProjectState.files, projectIdentifier);
-            
-            const thought = aiResponse.thought;
-            const plannerMatch = thought.match(/\*\*Perencana:\*\*\s*([\s\S]*?)(?=\n\*\*Pelaksana:\*\*|$)/);
-            const executorMatch = thought.match(/\*\*Pelaksana:\*\*\s*([\s\S]*?)(?=\n\*\*Peninjau:\*\*|$)/);
-            const reviewerMatch = thought.match(/\*\*Peninjau:\*\*\s*([\s\S]*)/);
-            
-            const agentThoughts: ChatMessage[] = [];
-            if (plannerMatch?.[1]?.trim()) agentThoughts.push({ role: 'assistant', content: plannerMatch[1].trim(), agent: 'Perencana' });
-            if (executorMatch?.[1]?.trim()) agentThoughts.push({ role: 'assistant', content: executorMatch[1].trim(), agent: 'Pelaksana' });
-            if (reviewerMatch?.[1]?.trim()) agentThoughts.push({ role: 'assistant', content: reviewerMatch[1].trim(), agent: 'Peninjau' });
+    // Helper to add messages and update state
+    const addMessage = async (content: string) => {
+        const newMessage: ChatMessage = { role: 'assistant', content };
+        setProject(p => {
+            const newProject = { ...p!, chatHistory: [...p!.chatHistory, newMessage] };
+            currentProjectState = newProject;
+            saveProject(newProject);
+            return newProject;
+        });
+        await new Promise(r => setTimeout(r, 100)); // Short delay for UI update
+    };
 
-            if (agentThoughts.length > 0) {
-                 for (const agentThought of agentThoughts) {
-                    currentProjectState = {
-                        ...currentProjectState,
-                        chatHistory: [...currentProjectState.chatHistory, agentThought]
-                    };
-                    setProject(currentProjectState);
-                    await new Promise(resolve => setTimeout(resolve, 800));
-                }
-            } else {
-                const thoughtMessage: ChatMessage = { role: 'assistant', content: aiResponse.thought };
-                currentProjectState = {
-                    ...currentProjectState,
-                    chatHistory: [...currentProjectState.chatHistory, thoughtMessage]
-                };
-                setProject(currentProjectState);
-            }
-            
-            if (aiResponse.operations.length > 0) {
-                const newFiles = applyOperations(currentProjectState.files, aiResponse.operations);
-                currentProjectState = { ...currentProjectState, files: newFiles, updatedAt: Date.now() };
+    // Helper to apply operation and update state
+    const executeOperation = async (operation: FileOperation) => {
+        setProject(p => {
+            const newFiles = applyOperation(p!.files, operation);
+            const newProject = { ...p!, files: newFiles, updatedAt: Date.now() };
+            currentProjectState = newProject;
 
-                if (selectedFilePath) {
-                    const opForSelectedFile = aiResponse.operations.find(op => op.path === selectedFilePath);
-                    if (opForSelectedFile) {
-                        if (opForSelectedFile.type === 'DELETE') {
-                            setSelectedFilePath(null);
-                            setEditorContent('');
-                        } else if (opForSelectedFile.content !== undefined) {
-                            setEditorContent(opForSelectedFile.content);
-                        }
-                        setIsEditorDirty(false);
+            if (selectedFilePath) {
+                const opForSelectedFile = operation.path === selectedFilePath;
+                if (opForSelectedFile) {
+                    if (operation.operation === 'DELETE') {
+                        setSelectedFilePath(null);
+                        setEditorContent('');
+                    } else if (operation.content !== undefined) {
+                        setEditorContent(operation.content);
                     }
+                    setIsEditorDirty(false);
                 }
             }
-            
-            setProject(currentProjectState);
-            await saveProject(currentProjectState);
 
-            if (aiResponse.status === 'COMPLETED') {
-                continueLoop = false;
-                if (aiResponse.summary) {
-                    const summaryMessage: ChatMessage = { role: 'assistant', content: aiResponse.summary };
-                    currentProjectState = { ...currentProjectState, chatHistory: [...currentProjectState.chatHistory, summaryMessage] };
-                    setProject(currentProjectState);
-                    await saveProject(currentProjectState);
-                }
-            } else {
-                loopPrompt = "Tugas belum selesai. Lanjutkan ke langkah berikutnya berdasarkan keadaan saat ini.";
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
-
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
-            setError(`Gagal mendapatkan respons dari AI: ${errorMessage}`);
-            const systemErrorMessage: ChatMessage = { role: 'assistant', content: `Maaf, terjadi kesalahan: ${errorMessage}` };
-            setProject(p => p ? {...p, chatHistory: [...p.chatHistory, systemErrorMessage]} : null);
-            continueLoop = false;
-        }
+            saveProject(newProject);
+            return newProject;
+        });
     }
 
-    setIsLoading(false);
+    try {
+      await addMessage("Tentu, saya sedang menganalisis permintaan Anda dan menyiapkan perubahannya...");
+      
+      const operations = await generateFileOperations(
+          initialUserPrompt,
+          currentProjectState.chatHistory,
+          currentProjectState.files,
+          projectIdentifier
+      );
+
+      if (operations.length === 0) {
+        await addMessage("Sepertinya tidak ada perubahan file yang diperlukan untuk permintaan Anda. Ada lagi yang bisa saya bantu?");
+        setIsLoading(false);
+        return;
+      }
+
+      const planSummary = operations.map(op => `• **${op.operation}**: \`${op.path}\` - *${op.reasoning}*`).join('\n');
+      await addMessage(`Baik, saya telah merencanakan perubahan berikut:\n${planSummary}`);
+      await addMessage("Sekarang saya akan menerapkan perubahan ini...");
+
+      for (const op of operations) {
+          await executeOperation(op);
+          await addMessage(`Selesai: **${op.operation}** \`${op.path}\``);
+          await new Promise(r => setTimeout(r, 100));
+      }
+      
+      await addMessage("Semua perubahan telah selesai! Anda dapat meninjau file atau melihat pratinjau situs web.");
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
+      setError(`Gagal mendapatkan respons dari AI: ${errorMessage}`);
+      await addMessage(`Maaf, terjadi kesalahan: ${errorMessage}`);
+    } finally {
+      setIsLoading(false);
+    }
 
   }, [project, userInput, isEditorDirty, selectedFilePath, handleSaveFile]);
 
@@ -306,7 +297,25 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     }
   };
   
-  if (!project) return <div className="p-8">Memuat proyek...</div>;
+  if (error) {
+    return (
+        <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-900 p-4">
+            <h2 className="text-2xl font-bold text-red-400 mb-4">Gagal Memuat Proyek</h2>
+            <p className="text-slate-300 text-center mb-6">{error}</p>
+            <button onClick={onBack} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">
+                <BackIcon />
+                Kembali ke Daftar Proyek
+            </button>
+        </div>
+    );
+  }
+  
+  if (!project) return (
+      <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-900">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-slate-300 mb-4"></div>
+          <p className="text-slate-300">Memuat proyek...</p>
+      </div>
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-900">

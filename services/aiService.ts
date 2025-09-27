@@ -1,145 +1,16 @@
-import type { ProjectFile, AIResponse, FileOperation } from '../types';
+import type { Project, ChatMessage, ProjectFile, FileOperation } from '../types';
 
 const API_URL = 'https://www.nirkyy.accesscam.org/api/ai/chatbot';
 const API_TOKEN = 'RIKI-BON4bV';
 
-const SYSTEM_PROMPT = `Anda adalah tim pengembang web AI otonom ahli yang terdiri dari tiga agen yang bekerja serempak.
-- **Agen 1: Perencana.** Anda menganalisis permintaan pengguna dan merancang rencana langkah demi langkah yang jelas.
-- **Agen 2: Pelaksana.** Anda mengeksekusi langkah rencana saat ini, menulis dan memodifikasi kode.
-- **Agen 3: Peninjau.** Anda meninjau kode yang dihasilkan untuk kualitas, kesalahan, atau kode mati, dan memastikan langkah tersebut selesai.
-
-Tugas Anda adalah memenuhi permintaan pengguna dengan mengeksekusi serangkaian langkah. Untuk setiap langkah, Anda akan memberikan respons JSON tunggal yang merangkum pekerjaan ketiga agen tersebut.
-
-Aturan Penting:
-1.  **Struktur Pikiran Tiga Agen**: Di setiap respons, jelaskan langkah Anda saat ini di kolom 'thought'. Formatnya HARUS seperti ini:
-    "thought": "**Perencana:** [Rencana Anda untuk langkah ini].\\n**Pelaksana:** [Detail tentang kode yang Anda tulis/ubah sekarang].\\n**Peninjau:** [Komentar singkat tentang pekerjaan yang dilakukan pada langkah ini]."
-2.  **Operasi File**: Sediakan daftar 'operations' (CREATE, UPDATE, DELETE) HANYA untuk langkah saat ini.
-3.  **Status**: Laporkan status Anda.
-    -   Gunakan "CONTINUING" jika Anda perlu melakukan lebih banyak langkah untuk menyelesaikan seluruh permintaan pengguna.
-    -   Gunakan "COMPLETED" hanya ketika seluruh tugas telah selesai sepenuhnya. Saat "COMPLETED", Agen 3 harus memberikan ringkasan akhir.
-4.  **Ringkasan**: Jika statusnya "COMPLETED", berikan ringkasan akhir dari semua pekerjaan yang telah Anda lakukan di kolom 'summary'. Jangan sertakan 'summary' jika statusnya "CONTINUING".
-5.  **Stateful**: Anda akan menerima keadaan file proyek saat ini di setiap permintaan. Gunakan ini untuk memutuskan langkah Anda selanjutnya.
-6.  **Validasi Kode**: Selalu periksa kembali kode Anda untuk validitas sintaks dan fungsionalitas.
-7.  **Format JSON**: Respons Anda HARUS berupa blok kode JSON yang valid dan tidak ada yang lain.
-
-Struktur Respons JSON yang Diperlukan:
-{
-  "thought": "**Perencana:** ...\\n**Pelaksana:** ...\\n**Peninjau:** ...",
-  "operations": [
-    { "type": "CREATE", "path": "index.html", "content": "..." }
-  ],
-  "status": "CONTINUING",
-  "summary": "Ringkasan akhir pekerjaan (hanya jika status 'COMPLETED')"
-}
-
-Contoh Permintaan Pengguna: "Buatkan situs halo dunia dengan file CSS terpisah"
-
-Contoh Respons Langkah 1 (CONTINUING):
-\`\`\`json
-{
-  "thought": "**Perencana:** Saya akan membuat file HTML dasar terlebih dahulu, yang akan menautkan ke stylesheet eksternal.\\n**Pelaksana:** Membuat file 'index.html' dengan boilerplate HTML5 dan tag link yang menunjuk ke 'css/style.css'.\\n**Peninjau:** File HTML terlihat benar dan siap untuk langkah berikutnya.",
-  "operations": [
-    {
-      "type": "CREATE",
-      "path": "index.html",
-      "content": "<!DOCTYPE html>\\n<html lang=\\"id\\">\\n<head>\\n  <title>Halo Dunia</title>\\n  <link rel=\\"stylesheet\\" href=\\"css/style.css\\">\\n</head>\\n<body>\\n  <h1>Halo Dunia!</h1>\\n</body>\\n</html>"
-    }
-  ],
-  "status": "CONTINUING"
-}
-\`\`\`
-
-Contoh Respons Langkah 2 (COMPLETED):
-\`\`\`json
-{
-  "thought": "**Perencana:** Langkah terakhir adalah membuat file CSS untuk menata elemen h1.\\n**Pelaksana:** Membuat file 'css/style.css' dan menambahkan aturan CSS untuk membuat teks h1 berwarna biru.\\n**Peninjau:** Kode CSS sudah benar dan menyelesaikan permintaan. Pekerjaan selesai.",
-  "operations": [
-    {
-      "type": "CREATE",
-      "path": "css/style.css",
-      "content": "h1 {\\n  color: blue;\\n}"
-    }
-  ],
-  "status": "COMPLETED",
-  "summary": "Saya telah berhasil membuat situs 'halo dunia' dengan file HTML dan CSS eksternal yang terpisah. Proyek ini sekarang menampilkan 'Halo Dunia!' dengan teks biru."
-}
-\`\`\`
-PENTING: Selalu bungkus respon JSON Anda dalam blok kode markdown (\`\`\`json ... \`\`\`).`;
-
-
-function buildPrompt(userRequest: string, existingFiles: ProjectFile[]): string {
-  let prompt = `Permintaan pengguna: "${userRequest}"\n\n`;
-  if (existingFiles.length > 0) {
-    prompt += "Ini adalah file proyek saat ini. Harap ubah sesuai permintaan pengguna dan berikan rencana serta operasi file yang diperlukan untuk LANGKAH BERIKUTNYA dalam format JSON yang ditentukan.\n\n";
-    existingFiles.forEach(file => {
-      prompt += `File: ${file.path}\nKonten:\n${file.content}\n\n`;
-    });
-  } else {
-    prompt += "Ini adalah proyek baru. Silakan buat file awal berdasarkan permintaan pengguna, mulai LANGKAH PERTAMA Anda dalam format JSON yang ditentukan.\n";
-  }
-  return prompt;
-}
-
-function parseAIResponse(responseText: string): AIResponse {
-    try {
-      // Find the JSON block within markdown code fences
-      const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-      const match = responseText.match(jsonRegex);
-      
-      let jsonString = '';
-      if (match && match[1]) {
-        jsonString = match[1];
-      } else {
-        // Fallback for cases where the AI forgets the markdown fences
-        const startIndex = responseText.indexOf('{');
-        const endIndex = responseText.lastIndexOf('}');
-        if (startIndex !== -1 && endIndex !== -1) {
-            jsonString = responseText.substring(startIndex, endIndex + 1);
-        } else {
-            throw new Error("Tidak ada blok JSON yang valid ditemukan dalam respons AI.");
-        }
-      }
-
-      const parsed = JSON.parse(jsonString);
-
-      if (!parsed.thought || !Array.isArray(parsed.operations) || !parsed.status) {
-        throw new Error("Struktur JSON tidak valid: bidang 'thought', 'operations', atau 'status' hilang.");
-      }
-      
-      if (parsed.status !== 'CONTINUING' && parsed.status !== 'COMPLETED') {
-          throw new Error(`Nilai 'status' tidak valid: ${parsed.status}`);
-      }
-
-      // Validate operations
-      parsed.operations.forEach((op: any) => {
-        if (!op.type || !op.path) {
-            throw new Error(`Objek operasi tidak valid: ${JSON.stringify(op)}`);
-        }
-        if ((op.type === 'CREATE' || op.type === 'UPDATE') && typeof op.content !== 'string') {
-            throw new Error(`Operasi ${op.type} untuk ${op.path} tidak memiliki konten.`);
-        }
-      });
-
-      return parsed as AIResponse;
-    } catch (e) {
-      console.error("Gagal mengurai respons AI:", e);
-      console.error("Teks respons asli:", responseText);
-      // Provide a user-friendly error in the thought field
-      return {
-          thought: `Maaf, saya mengalami masalah dalam memproses respons saya. Kesalahan: ${(e as Error).message}. Coba lagi nanti.`,
-          operations: [],
-          status: 'COMPLETED' // Stop the loop on error
-      };
-    }
-}
-
-export const generateWebsiteCode = async (
-  userRequest: string,
-  existingFiles: ProjectFile[],
-  projectIdentifier: string
-): Promise<AIResponse> => {
-  const fullPrompt = buildPrompt(userRequest, existingFiles);
-
+/**
+ * A generic function to call the AI API.
+ */
+const callAIAgent = async (
+  prompt: string,
+  systemPrompt: string,
+  agentIdentifier: string
+): Promise<any> => {
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -148,9 +19,9 @@ export const generateWebsiteCode = async (
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        user: projectIdentifier,
-        prompt: fullPrompt,
-        system: SYSTEM_PROMPT,
+        user: agentIdentifier,
+        prompt: prompt,
+        system: systemPrompt,
         web: false,
         cleardb: false,
       })
@@ -167,9 +38,170 @@ export const generateWebsiteCode = async (
       throw new Error('Struktur respons API tidak valid');
     }
 
-    return parseAIResponse(result.data.answer);
+    return result.data.answer;
   } catch (error) {
-    console.error('Kesalahan saat memanggil layanan AI:', error);
+    console.error(`Kesalahan saat memanggil AI:`, error);
     throw error;
   }
+};
+
+const buildFileContext = (existingFiles: ProjectFile[]): string => {
+  if (existingFiles.length === 0) {
+    return "Ini adalah proyek baru tanpa file yang ada.\n";
+  }
+  let context = "Ini adalah file proyek saat ini:\n\n";
+  existingFiles.forEach(file => {
+    context += `--- File: ${file.path} ---\n${file.content}\n\n`;
+  });
+  return context;
+};
+
+const buildChatHistoryContext = (chatHistory: ChatMessage[]): string => {
+    if (chatHistory.length <= 1) { // only the new user prompt
+        return "";
+    }
+    // Get the last 6 messages, excluding the most recent user message which is part of the main prompt
+    const relevantHistory = chatHistory.slice(-7, -1);
+    if (relevantHistory.length === 0) {
+        return "";
+    }
+    let context = "Berikut adalah riwayat obrolan singkat untuk konteks:\n\n";
+    relevantHistory.forEach(msg => {
+        context += `${msg.role === 'user' ? 'Pengguna' : 'AI'}: ${msg.content}\n`;
+    });
+    context += "\n";
+    return context;
+}
+
+/**
+ * Finds the matching closing bracket for an opening bracket at a given index.
+ * Handles nested brackets and ignores brackets within string literals.
+ */
+const findMatchingBracket = (str: string, start: number): number => {
+    if (str[start] !== '[') return -1;
+    
+    let depth = 1;
+    let inString = false;
+    
+    for (let i = start + 1; i < str.length; i++) {
+        const char = str[i];
+        
+        if (char === '"' && str[i-1] !== '\\') {
+            inString = !inString;
+        }
+        
+        if (!inString) {
+            if (char === '[') {
+                depth++;
+            } else if (char === ']') {
+                depth--;
+            }
+        }
+        
+        if (depth === 0) {
+            return i;
+        }
+    }
+    
+    return -1; // Not found
+};
+
+const parseOperationsResponse = (response: any): FileOperation[] => {
+    let operations: any;
+
+    if (typeof response === 'string') {
+        try {
+            let jsonString = response;
+            
+            const startIndex = jsonString.indexOf('[');
+            if (startIndex === -1) {
+                throw new Error("Tidak ada larik JSON yang ditemukan dalam respons string AI.");
+            }
+            
+            const endIndex = findMatchingBracket(jsonString, startIndex);
+            if (endIndex === -1) {
+                const lastIndex = jsonString.lastIndexOf(']');
+                if (lastIndex > startIndex) {
+                     jsonString = jsonString.substring(startIndex, lastIndex + 1);
+                } else {
+                    throw new Error("Tidak dapat menemukan larik JSON yang lengkap (kurung tidak cocok).");
+                }
+            } else {
+                 jsonString = jsonString.substring(startIndex, endIndex + 1);
+            }
+
+            operations = JSON.parse(jsonString);
+
+        } catch (e) {
+            console.error("Gagal mengurai respons string AI:", e, "Teks Asli:", response);
+            throw new Error(`Gagal mengurai respons string AI: ${(e as Error).message}`);
+        }
+    } else if (Array.isArray(response)) {
+        operations = response;
+    } else {
+        const errorMsg = `Respons AI bukan string atau larik yang valid. Diterima tipe ${typeof response}.`;
+        console.error(errorMsg, "Konten:", response);
+        throw new Error(errorMsg);
+    }
+
+    if (!Array.isArray(operations)) {
+        throw new Error("Data yang diurai bukan sebuah larik.");
+    }
+
+    operations.forEach((op: any, index: number) => {
+        if (!op.operation || !op.path || !op.reasoning) {
+            throw new Error(`Operasi pada indeks ${index} kehilangan bidang yang diperlukan (operation, path, reasoning).`);
+        }
+        if (!['CREATE', 'UPDATE', 'DELETE'].includes(op.operation)) {
+            throw new Error(`Operasi pada indeks ${index} memiliki 'operation' yang tidak valid: ${op.operation}`);
+        }
+        if ((op.operation === 'CREATE' || op.operation === 'UPDATE') && typeof op.content !== 'string') {
+             throw new Error(`Operasi ${op.operation} pada indeks ${index} ('${op.path}') memerlukan bidang 'content' string.`);
+        }
+    });
+
+    return operations as FileOperation[];
+};
+
+export const generateFileOperations = async (
+    userRequest: string,
+    chatHistory: ChatMessage[],
+    files: ProjectFile[],
+    projectIdentifier: string
+): Promise<FileOperation[]> => {
+    const systemPrompt = `Anda adalah seorang AI pengembang web otonom yang ahli. Tugas Anda adalah membantu pengguna membangun dan memodifikasi situs web standar HTML, CSS, dan JavaScript.
+
+Anda akan diberi permintaan pengguna, riwayat obrolan saat ini, dan keadaan lengkap file proyek.
+Berdasarkan informasi ini, Anda harus menentukan operasi file yang diperlukan (CREATE, UPDATE, DELETE) untuk memenuhi permintaan tersebut.
+
+Anda HARUS merespons HANYA dengan satu larik JSON dari objek operasi file. Jangan sertakan teks lain, penjelasan, atau format markdown di luar larik JSON.
+
+Larik JSON harus mengikuti struktur ini:
+[
+  {
+    "operation": "CREATE" | "UPDATE" | "DELETE",
+    "path": "path/ke/file.ext",
+    "content": "...",
+    "reasoning": "Penjelasan singkat satu kalimat mengapa operasi ini diperlukan."
+  }
+]
+
+ATURAN PENTING:
+1.  **HANYA JSON**: Seluruh respons Anda harus berupa larik JSON yang valid.
+2.  **Konten Lengkap**: Untuk CREATE dan UPDATE, berikan konten file *seluruhnya*. Jangan berikan diff atau kode parsial. Abaikan 'content' untuk DELETE.
+3.  **Sederhana**: Tetap gunakan HTML, CSS, dan JS standar. Jangan gunakan kerangka kerja yang kompleks kecuali diminta secara eksplisit.
+4.  **Efisien**: Gabungkan perubahan ke dalam satu operasi jika memungkinkan. Misalnya, jika membuat file HTML baru, sertakan semua konten awalnya dalam satu operasi "CREATE".
+5.  **Konteks adalah Kunci**: Analisis file yang ada untuk memahami struktur proyek dan buat modifikasi yang cerdas. Jika sebuah file sudah ada, operasinya harus "UPDATE", bukan "CREATE".
+6.  **Path File**: Gunakan struktur file yang datar dan sederhana kecuali struktur direktori diminta secara eksplisit (mis., 'styles/main.css').
+7.  **Escaping**: Pastikan semua konten dalam JSON di-escape dengan benar, terutama tanda kutip dan baris baru di dalam bidang "content".`;
+
+    const prompt = `
+${buildChatHistoryContext(chatHistory)}
+${buildFileContext(files)}
+Permintaan Pengguna: "${userRequest}"
+
+Berdasarkan semua informasi di atas, silakan hasilkan larik JSON operasi file untuk memenuhi permintaan pengguna.
+`;
+    const response = await callAIAgent(prompt, systemPrompt, `${projectIdentifier}-ArchitectAgent`);
+    return parseOperationsResponse(response);
 };

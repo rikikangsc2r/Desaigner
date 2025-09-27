@@ -94,15 +94,3 @@ export const MaximizeIcon: React.FC<{className?: string}> = ({className}) => (
 export const MinimizeIcon: React.FC<{className?: string}> = ({className}) => (
     <svg {...iconProps} className={className || iconProps.className}><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" /></svg>
 );
-
-export const PlannerIcon: React.FC<{className?: string}> = ({className}) => (
-    <svg {...iconProps} className={className || iconProps.className}><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" ry="1" /></svg>
-);
-
-export const ExecutorIcon: React.FC<{className?: string}> = ({className}) => (
-    <svg {...iconProps} className={className || iconProps.className}><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>
-);
-
-export const ReviewerIcon: React.FC<{className?: string}> = ({className}) => (
-    <svg {...iconProps} className={className || iconProps.className}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-);

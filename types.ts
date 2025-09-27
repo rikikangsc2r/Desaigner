@@ -1,3 +1,4 @@
+
 export interface ProjectFile {
   path: string;
   content: string;
@@ -15,20 +16,14 @@ export interface Project {
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
-  agent?: 'Perencana' | 'Pelaksana' | 'Peninjau';
 }
 
 export type FileOperationType = 'CREATE' | 'UPDATE' | 'DELETE';
 
 export interface FileOperation {
-  type: FileOperationType;
+  // FIX: Renamed 'type' to 'operation' for consistency with the AI service response.
+  operation: FileOperationType;
   path: string;
   content?: string; // content is optional for DELETE
-}
-
-export interface AIResponse {
-  thought: string;
-  operations: FileOperation[];
-  status: 'CONTINUING' | 'COMPLETED';
-  summary?: string;
+  reasoning: string;
 }
