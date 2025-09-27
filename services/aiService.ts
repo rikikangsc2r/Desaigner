@@ -4,6 +4,16 @@ const API_URL = 'https://www.nirkyy.accesscam.org/api/ai/chatbot';
 const API_TOKEN = 'RIKI-BON4bV';
 
 /**
+ * Custom error for when the AI returns a conversational response instead of file operations.
+ */
+export class AIConversationalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AIConversationalError';
+  }
+}
+
+/**
  * A generic function to call the AI API.
  */
 const callAIAgent = async (
@@ -65,10 +75,17 @@ const parseOperationsResponse = (response: any): FileOperation[] => {
 
     try {
         // Clean up response: remove markdown code blocks if present and trim
-        const txtResponse = response.replace(/```(txt|text)?/g, '').trim();
+        const txtResponse = response.replace(/```(txt|text|json)?/g, '').trim();
 
         if (!txtResponse) {
             return [];
+        }
+
+        // Heuristically check if the response is structured as expected. If not, it's a refusal or conversational reply.
+        const isStructuredResponse = /operation:|path:|reasoning:/i.test(txtResponse);
+        if (!isStructuredResponse) {
+            // This custom error will be caught in the UI to be displayed as a chat message.
+            throw new AIConversationalError(txtResponse);
         }
 
         const operationBlocks = txtResponse.split(/^\s*--\s*$/m);
@@ -134,6 +151,10 @@ const parseOperationsResponse = (response: any): FileOperation[] => {
         return operations;
 
     } catch (e) {
+        // Re-throw our custom error directly so it's not wrapped in another error message.
+        if (e instanceof AIConversationalError) {
+            throw e;
+        }
         console.error("Gagal mengurai respons teks AI:", e, "Teks Asli:", response);
         throw new Error(`Gagal mengurai respons teks AI: ${(e as Error).message}`);
     }

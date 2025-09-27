@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
 import { getProject, saveProject } from '../services/projectService';
-import { generateFileOperations } from '../services/aiService';
+import { generateFileOperations, AIConversationalError } from '../services/aiService';
 import { createProjectZip } from '../utils/fileUtils';
 import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon } from './Icons';
 import { TypingIndicator } from './Loader';
@@ -244,9 +244,15 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
       await addMessage("Semua perubahan telah selesai! Anda dapat meninjau file atau melihat pratinjau situs web.");
 
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
-      setError(`Gagal mendapatkan respons dari AI: ${errorMessage}`);
-      await addMessage(`Maaf, terjadi kesalahan: ${errorMessage}`);
+      if (err instanceof AIConversationalError) {
+        // The AI responded conversationally (e.g., a refusal). Add its message to the chat.
+        await addMessage(err.message);
+      } else {
+        // Handle all other errors as before
+        const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
+        setError(`Gagal mendapatkan respons dari AI: ${errorMessage}`);
+        await addMessage(`Maaf, terjadi kesalahan: ${errorMessage}`);
+      }
     } finally {
       setIsLoading(false);
     }
