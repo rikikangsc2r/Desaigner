@@ -2,9 +2,16 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ProjectList from './components/ProjectList';
 import ProjectEditor from './components/ProjectEditor';
 import ProjectPreview from './components/ProjectPreview';
+import JsonBlobViewer from './components/JsonBlobViewer';
+
+type AppRoute = 
+  | { name: 'list' }
+  | { name: 'editor', projectId: string }
+  | { name: 'preview', projectId: string }
+  | { name: 'view-jsonblob', blobId: string };
 
 const App: React.FC = () => {
-  const [route, setRoute] = useState({ name: 'list', projectId: null as string | null });
+  const [route, setRoute] = useState<AppRoute>({ name: 'list' });
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -15,8 +22,10 @@ const App: React.FC = () => {
         setRoute({ name: 'editor', projectId: parts[1] });
       } else if (parts[0] === 'preview' && parts[1]) {
         setRoute({ name: 'preview', projectId: parts[1] });
+      } else if (parts[0] === 'view' && parts[1] === 'jsonblob' && parts[2]) {
+        setRoute({ name: 'view-jsonblob', blobId: parts[2] });
       } else {
-        setRoute({ name: 'list', projectId: null });
+        setRoute({ name: 'list' });
       }
     };
 
@@ -36,17 +45,23 @@ const App: React.FC = () => {
     window.location.hash = '';
   }, []);
 
-  if (route.name === 'preview' && route.projectId) {
-    return <ProjectPreview projectId={route.projectId} />;
+  const renderContent = () => {
+    switch(route.name) {
+      case 'preview':
+        return <ProjectPreview projectId={route.projectId} />;
+      case 'view-jsonblob':
+        return <JsonBlobViewer blobId={route.blobId} />;
+      case 'editor':
+        return <ProjectEditor projectId={route.projectId} onBack={handleBackToList} />;
+      case 'list':
+      default:
+        return <ProjectList onSelectProject={handleSelectProject} />;
+    }
   }
 
   return (
     <div className="bg-slate-900 min-h-screen font-sans text-slate-200">
-      {route.name === 'editor' && route.projectId ? (
-        <ProjectEditor projectId={route.projectId} onBack={handleBackToList} />
-      ) : (
-        <ProjectList onSelectProject={handleSelectProject} />
-      )}
+      {renderContent()}
     </div>
   );
 };

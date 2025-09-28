@@ -1,13 +1,15 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation, BlueprintFile, FileOperationType } from '../types';
 import { getProject, saveProject } from '../services/projectService';
 import { runTaskingAgent, generateBlueprint, generateCodeFromBlueprint, AIConversationalError } from '../services/aiService';
-import { createProjectZip } from '../utils/fileUtils';
-import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, MenuIcon, XIcon } from './Icons';
+import { createProjectZip, createPreviewHtml } from '../utils/fileUtils';
+import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, MenuIcon, XIcon, CloudUploadIcon, SpinnerIcon } from './Icons';
 import { TypingIndicator } from './Loader';
 import FileTree from './FileTree';
 import CodeEditor from './CodeEditor';
+import ShareModal from './ShareModal';
 
 interface ProjectEditorProps {
   projectId: string;
@@ -97,6 +99,9 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [activeView, setActiveView] = useState<MobileView>('chat');
   const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishedUrl, setPublishedUrl] = useState('');
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const projectRef = useRef<Project | null>(null);
 
   useEffect(() => {
@@ -326,6 +331,44 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
       alert('Tidak ada file untuk dipratinjau.');
     }
   };
+  
+  const handlePublish = useCallback(async () => {
+    if (!project || isPublishing) return;
+    setIsPublishing(true);
+    setError(null);
+    try {
+        const htmlContent = createPreviewHtml(project.files);
+        const response = await fetch('https://jsonblob.com/api/jsonBlob', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify({ html: htmlContent })
+        });
+        if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`JSONBlob API error (${response.status}): ${errorBody}`);
+        }
+        const blobUrl = response.headers.get('Location');
+        if (!blobUrl) {
+            throw new Error('Could not get blob URL from JSONBlob response header.');
+        }
+        const blobId = blobUrl.split('/').pop();
+        if (!blobId) {
+             throw new Error('Could not parse blob ID from URL.');
+        }
+        const shareableUrl = `${window.location.origin}${window.location.pathname}#/view/jsonblob/${blobId}`;
+        setPublishedUrl(shareableUrl);
+        setIsShareModalOpen(true);
+    } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
+        setError(`Failed to publish: ${errorMessage}`);
+    } finally {
+        setIsPublishing(false);
+    }
+  }, [project, isPublishing]);
+
 
   const handleDownload = async () => {
     if (project && project.files.length > 0) {
@@ -427,6 +470,9 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         </div>
         <h2 className="text-xl font-bold text-slate-100 truncate mx-2 text-center">{project.name}</h2>
         <div className="flex-1 flex justify-end items-center gap-2">
+          <button onClick={handlePublish} disabled={isPublishing} title="Publish Website" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors disabled:bg-slate-600 disabled:cursor-wait">
+            {isPublishing ? <SpinnerIcon /> : <CloudUploadIcon />}
+          </button>
           <button onClick={handlePreview} title="Preview Website" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors">
             <EyeIcon />
           </button>
@@ -500,7 +546,12 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
             </div>
         </section>
       </main>
-
+      <ShareModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        title="Project Published!"
+        url={publishedUrl}
+      />
     </div>
   );
 };
