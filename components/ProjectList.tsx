@@ -1,13 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import { getProjects, saveProject, deleteProject } from '../services/projectService';
-import { getTemplateFiles, type TemplateType } from '../services/templates';
-import type { Project } from '../types';
+import { getTemplateFiles } from '../services/templates';
+import type { Project, TemplateType, StyleLibrary } from '../types';
 import { PlusIcon, TrashIcon, CodeIcon } from './Icons';
 import ConfirmModal from './ConfirmModal';
 
 interface ProjectListProps {
   onSelectProject: (id: string) => void;
 }
+
+const templates: { id: TemplateType; name: string; desc: string }[] = [
+    { id: 'html', name: 'Single File HTML', desc: 'A single HTML file to get started quickly.' },
+    { id: 'vanilla', name: 'HTML, CSS, JS', desc: 'A classic starting point for any web project.' },
+    { id: 'react-jsx', name: 'React + JSX', desc: 'A starter project using React with JSX via CDN.' },
+    { id: 'react-tsx', name: 'React + TSX', desc: 'A starter project using React with TypeScript (TSX).' }
+];
+
+const styles: { id: StyleLibrary; name: string }[] = [
+    { id: 'none', name: 'None' },
+    { id: 'tailwindcss', name: 'TailwindCSS' },
+    { id: 'bootstrap', name: 'Bootstrap' },
+];
+
+// FIX: Moved TemplateButton outside of ProjectList to prevent re-creation on each render and fix typing issues with the `key` prop.
+const TemplateButton: React.FC<{ 
+  id: TemplateType; 
+  name: string; 
+  desc: string; 
+  isSelected: boolean; 
+  onSelect: (id: TemplateType) => void; 
+}> = ({ id, name, desc, isSelected, onSelect }) => (
+    <button 
+      onClick={() => onSelect(id)}
+      className={`p-4 border-2 rounded-lg text-left transition-all duration-200 ${isSelected ? 'border-indigo-500 bg-indigo-900/30 ring-2 ring-indigo-500' : 'border-slate-700 hover:border-slate-500 bg-slate-700/30'}`}
+    >
+      <h3 className="font-bold text-lg text-slate-100">{name}</h3>
+      <p className="text-sm text-slate-400 mt-1">{desc}</p>
+    </button>
+);
+
 
 const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -16,6 +47,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('vanilla');
+  const [selectedStyle, setSelectedStyle] = useState<StyleLibrary>('none');
 
   useEffect(() => {
     getProjects().then(projects => {
@@ -26,7 +58,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
   const handleCreateProject = async () => {
     if (newProjectName.trim() === '') return;
 
-    const templateFiles = getTemplateFiles(selectedTemplate, newProjectName.trim());
+    const templateFiles = getTemplateFiles(selectedTemplate, newProjectName.trim(), selectedStyle);
 
     const newProject: Project = {
       id: `proj_${Date.now()}`,
@@ -35,6 +67,8 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
       chatHistory: [],
       updatedAt: Date.now(),
       currentSessionId: Math.random().toString(36).substring(2, 9),
+      template: selectedTemplate,
+      styleLibrary: selectedStyle,
     };
     await saveProject(newProject);
     setProjects(prev => [newProject, ...prev].sort((a, b) => b.updatedAt - a.updatedAt));
@@ -88,26 +122,29 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
                 />
               </div>
 
-              <div className="mb-8">
+              <div className="mb-6">
                 <label className="block text-sm font-medium text-slate-300 mb-3">Select a Template</label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Vanilla Template */}
-                    <button 
-                      onClick={() => setSelectedTemplate('vanilla')}
-                      className={`p-4 border-2 rounded-lg text-left transition-all duration-200 ${selectedTemplate === 'vanilla' ? 'border-indigo-500 bg-indigo-900/30 ring-2 ring-indigo-500' : 'border-slate-700 hover:border-slate-500 bg-slate-700/30'}`}
-                    >
-                      <h3 className="font-bold text-lg text-slate-100">HTML, CSS, JS</h3>
-                      <p className="text-sm text-slate-400 mt-1">A classic, simple starting point for any web project.</p>
-                    </button>
+                    {templates.map(t => (
+                      <TemplateButton 
+                        key={t.id} 
+                        {...t} 
+                        isSelected={selectedTemplate === t.id} 
+                        onSelect={setSelectedTemplate} 
+                      />
+                    ))}
+                </div>
+              </div>
 
-                    {/* React Template */}
-                    <button 
-                      onClick={() => setSelectedTemplate('react')}
-                      className={`p-4 border-2 rounded-lg text-left transition-all duration-200 ${selectedTemplate === 'react' ? 'border-indigo-500 bg-indigo-900/30 ring-2 ring-indigo-500' : 'border-slate-700 hover:border-slate-500 bg-slate-700/30'}`}
-                    >
-                      <h3 className="font-bold text-lg text-slate-100">React & JSX</h3>
-                      <p className="text-sm text-slate-400 mt-1">A starter project using React via CDN for quick prototypes.</p>
-                    </button>
+              <div className="mb-8">
+                <label className="block text-sm font-medium text-slate-300 mb-3">Select a Style CDN (Optional)</label>
+                <div className="flex flex-wrap gap-3">
+                    {styles.map(s => (
+                        <button key={s.id} onClick={() => setSelectedStyle(s.id)}
+                            className={`px-4 py-2 text-sm font-semibold rounded-full border-2 transition-colors ${selectedStyle === s.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700/50 border-slate-600 hover:border-slate-500 text-slate-200'}`}>
+                            {s.name}
+                        </button>
+                    ))}
                 </div>
               </div>
 

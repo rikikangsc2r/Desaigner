@@ -106,17 +106,20 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   useEffect(() => {
     getProject(projectId).then(p => {
         if (p) {
-            if (!p.currentSessionId) {
-                const updatedProject = {
-                    ...p,
-                    currentSessionId: Math.random().toString(36).substring(2, 9)
-                };
-                setProject(updatedProject);
-                saveProject(updatedProject).catch(err => {
-                    console.error("Failed to save project with new session ID:", err);
+            // Add defaults for projects created before template/style properties existed
+            const projectWithDefaults: Project = {
+                ...p,
+                template: p.template || 'vanilla',
+                styleLibrary: p.styleLibrary || 'none',
+                currentSessionId: p.currentSessionId || Math.random().toString(36).substring(2, 9),
+            };
+
+            setProject(projectWithDefaults);
+            // Save back if defaults were added
+            if (!p.template || !p.styleLibrary || !p.currentSessionId) {
+                saveProject(projectWithDefaults).catch(err => {
+                    console.error("Failed to save project with new defaults:", err);
                 });
-            } else {
-                setProject(p);
             }
         } else {
             setError(`Project tidak ditemukan.`);
@@ -179,47 +182,47 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         }
     }
 
-    const userMessage: ChatMessage = { role: 'user', content: userInput };
     const userGoal = userInput;
     setUserInput('');
     setIsLoading(true);
     setError(null);
     
-    // Use a function to update state to ensure we're always working with the latest state
-    const updateProjectState = (updater: (p: Project) => Project) => {
-        setProject(prevProject => {
-            if (!prevProject) return null;
-            const newState = updater(prevProject);
-            projectRef.current = newState; // Keep ref in sync
-            return newState;
-        });
+    // Use a local variable to hold the working state throughout the async operation.
+    // Initialize it from the ref, which holds the latest confirmed state.
+    let workingProject = projectRef.current!;
+
+    // Helper to apply updates to the working state and push to React state for UI updates.
+    const applyUpdate = (updater: (p: Project) => Project) => {
+        workingProject = updater(workingProject);
+        setProject(workingProject);
     };
 
-    updateProjectState(p => ({ ...p, chatHistory: [...p.chatHistory, userMessage] }));
+    const userMessage: ChatMessage = { role: 'user', content: userGoal };
+    applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, userMessage] }));
 
     try {
         // Agent 1: Generate Blueprint
-        const blueprint = await generateBlueprint(userGoal, projectRef.current!.files);
+        const blueprint = await generateBlueprint(userGoal, workingProject.files, workingProject.template, workingProject.styleLibrary);
 
         const blueprintMessageContent = "Baik, saya mengerti. Berikut adalah rencana saya:\n\n" +
             blueprint.map(b => `*   **${b.operation}** \`${b.path}\` - ${b.description}`).join('\n');
         
-        updateProjectState(p => ({
+        applyUpdate(p => ({
             ...p,
             chatHistory: [...p.chatHistory, { role: 'assistant', content: blueprintMessageContent }]
         }));
 
         await new Promise(resolve => setTimeout(resolve, 1000)); // Small delay for UX
 
-        updateProjectState(p => ({
+        applyUpdate(p => ({
             ...p,
             chatHistory: [...p.chatHistory, { role: 'assistant', content: "Sekarang saya akan menulis kodenya..." }]
         }));
 
         // Agent 2: Generate Code from Blueprint
-        const operations = await generateCodeFromBlueprint(userGoal, blueprint, projectRef.current!.files);
+        const operations = await generateCodeFromBlueprint(userGoal, blueprint, workingProject.files, workingProject.template, workingProject.styleLibrary);
         
-        let currentFiles = projectRef.current!.files;
+        let currentFiles = workingProject.files;
         for (const op of operations) {
             currentFiles = applyOperation(currentFiles, op);
             
@@ -235,23 +238,24 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
             }
         }
         
-        updateProjectState(p => ({
+        applyUpdate(p => ({
             ...p,
             files: currentFiles,
             updatedAt: Date.now(),
         }));
 
-        // FIX: Explicitly type successMessage as ChatMessage to prevent type widening of the 'role' property.
         const successMessage: ChatMessage = { role: 'assistant', content: `Selesai! Saya telah melakukan ${operations.length} perubahan pada file proyek.` };
-        updateProjectState(p => ({ ...p, chatHistory: [...p.chatHistory, successMessage] }));
+        applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, successMessage] }));
     
     } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
         setError(`Gagal mendapatkan respons dari AI: ${errorMessage}`);
         const finalMessage: ChatMessage = { role: 'assistant', content: `Maaf, terjadi kesalahan: ${errorMessage}` };
-        updateProjectState(p => ({ ...p, chatHistory: [...p.chatHistory, finalMessage] }));
+        applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, finalMessage] }));
     } finally {
         setIsLoading(false);
+        // Sync the final state back to the ref and save to DB
+        projectRef.current = workingProject;
         if (projectRef.current) {
             await saveProject(projectRef.current);
         }

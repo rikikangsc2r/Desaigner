@@ -4,6 +4,9 @@ export interface ProjectFile {
   content: string;
 }
 
+export type TemplateType = 'html' | 'vanilla' | 'react-jsx' | 'react-tsx';
+export type StyleLibrary = 'none' | 'bootstrap' | 'tailwindcss';
+
 export interface Project {
   id: string;
   name: string;
@@ -11,6 +14,8 @@ export interface Project {
   updatedAt: number;
   chatHistory: ChatMessage[];
   currentSessionId: string;
+  template: TemplateType;
+  styleLibrary: StyleLibrary;
 }
 
 export interface ChatMessage {

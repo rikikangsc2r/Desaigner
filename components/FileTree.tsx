@@ -66,9 +66,7 @@ const TreeItem: React.FC<{
                 {isOpen && node.children && (
                     <div>
                         {Object.values(node.children)
-                            // FIX: Explicitly type sort callback parameters to fix type inference issue.
                             .sort((a: TreeNode, b: TreeNode) => (a.isFolder === b.isFolder) ? a.name.localeCompare(b.name) : (a.isFolder ? -1 : 1))
-                            // FIX: Explicitly type map callback parameter to fix type inference issue for 'child'.
                             .map((child: TreeNode) => (
                                 <TreeItem key={child.path} node={child} onSelectFile={onSelectFile} selectedFile={selectedFile} level={level + 1} />
                         ))}
@@ -94,7 +92,6 @@ const TreeItem: React.FC<{
 const FileTree: React.FC<FileTreeProps> = ({ files, onSelectFile, selectedFile }) => {
     const tree = useMemo(() => buildTree(files), [files]);
 
-    // FIX: Explicitly type sort callback parameters to fix type inference issue.
     const sortedTree = Object.values(tree).sort((a: TreeNode, b: TreeNode) => (a.isFolder === b.isFolder) ? a.name.localeCompare(b.name) : (a.isFolder ? -1 : 1));
 
     if (files.length === 0) {
@@ -103,7 +100,6 @@ const FileTree: React.FC<FileTreeProps> = ({ files, onSelectFile, selectedFile }
 
     return (
         <div className="space-y-1">
-            {/* FIX: Explicitly type map callback parameter to fix type inference issue for 'node'. */}
             {sortedTree.map((node: TreeNode) => (
                 <TreeItem key={node.path} node={node} onSelectFile={onSelectFile} selectedFile={selectedFile} level={0} />
             ))}

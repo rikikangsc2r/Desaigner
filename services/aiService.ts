@@ -1,4 +1,4 @@
-import type { ProjectFile, ChatMessage, FileOperation, BlueprintFile } from '../types';
+import type { ProjectFile, ChatMessage, FileOperation, BlueprintFile, TemplateType, StyleLibrary } from '../types';
 
 const API_URL = 'https://nirkyy-testing.hf.space/api/generate';
 
@@ -57,6 +57,23 @@ const buildFileContext = (files: ProjectFile[]): string => {
   return context;
 };
 
+const getStackDescription = (template: TemplateType, styleLibrary: StyleLibrary): string => {
+    let stack = '';
+    switch (template) {
+        case 'html': stack = 'Single-file HTML'; break;
+        case 'vanilla': stack = 'HTML, CSS, and JavaScript'; break;
+        case 'react-jsx': stack = 'React with JSX'; break;
+        case 'react-tsx': stack = 'React with TypeScript (TSX)'; break;
+    }
+    if (styleLibrary === 'bootstrap') {
+        stack += ' and Bootstrap';
+    } else if (styleLibrary === 'tailwindcss') {
+        stack += ' and TailwindCSS';
+    }
+    return stack;
+};
+
+
 const parseJsonResponse = <T>(response: string): T => {
     try {
         // Remove markdown code blocks and trim whitespace
@@ -109,9 +126,15 @@ const parseJsonResponse = <T>(response: string): T => {
 
 export const generateBlueprint = async (
     userGoal: string,
-    files: ProjectFile[]
+    files: ProjectFile[],
+    template: TemplateType,
+    styleLibrary: StyleLibrary,
 ): Promise<BlueprintFile[]> => {
+    const stackDescription = getStackDescription(template, styleLibrary);
     const systemPrompt = `Anda adalah AI perencana senior (Blueprint Agent) dengan spesialisasi dalam arsitektur front-end dan desain UI/UX kelas dunia. Tugas Anda adalah mengubah permintaan pengguna menjadi rencana (blueprint) operasi file yang terstruktur dengan baik dan siap untuk produksi. Jangan tulis kodenya.
+
+**KONTEKS PROYEK:**
+*   **Tumpukan Teknologi:** Proyek ini dibangun menggunakan **${stackDescription}**. Pastikan semua rencana file sesuai dengan tumpukan teknologi ini.
 
 **PRINSIP PANDUAN UTAMA:**
 1.  **Kualitas Kode Produksi:** Selalu prioritaskan kode yang bersih, modular, dapat dipelihara, dan berperforma tinggi. Gunakan praktik terbaik modern. Pikirkan tentang skalabilitas jangka panjang.
@@ -184,7 +207,9 @@ const parseFileContentResponse = (response: string): { path: string, content: st
 export const generateCodeFromBlueprint = async (
     userGoal: string,
     blueprint: BlueprintFile[],
-    files: ProjectFile[]
+    files: ProjectFile[],
+    template: TemplateType,
+    styleLibrary: StyleLibrary,
 ): Promise<FileOperation[]> => {
     
     // Separate blueprint operations: coding agent handles CREATE/UPDATE, DELETEs are handled directly.
@@ -201,8 +226,12 @@ export const generateCodeFromBlueprint = async (
     if (opsToCode.length === 0) {
         return deleteOps;
     }
-
+    
+    const stackDescription = getStackDescription(template, styleLibrary);
     const systemPrompt = `Anda adalah AI pembuat kode ahli (Coding Agent) yang berfokus pada kualitas produksi. Berdasarkan permintaan pengguna dan RENCANA yang diberikan, tulis KONTEN LENGKAP untuk semua file yang perlu dibuat atau diubah.
+
+**KONTEKS PROYEK PENTING:**
+*   **Tumpukan Teknologi:** Proyek ini dibangun menggunakan **${stackDescription}**. Semua kode yang Anda tulis HARUS sesuai dengan tumpukan teknologi ini. Misalnya, jika menggunakan TailwindCSS, gunakan kelas utilitasnya. Jika menggunakan React, tulis komponen fungsional dengan Hooks.
 
 **ATURAN OUTPUT PENTING:**
 1.  **HANYA TULIS KODE:** Jangan tambahkan penjelasan atau teks percakapan apa pun.
@@ -240,7 +269,7 @@ Tujuan Pengguna: "${userGoal}"
 Rencana (Blueprint) untuk diikuti (hanya buat/perbarui file-file ini):
 ${JSON.stringify(opsToCode, null, 2)}
 
-Sekarang, hasilkan konten lengkap untuk file-file dalam format yang ditentukan.
+Sekarang, hasilkan konten lengkap untuk file-file dalam format yang ditentukan. Patuhi tumpukan teknologi proyek!
 `;
 
     const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
