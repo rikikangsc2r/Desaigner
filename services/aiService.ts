@@ -3,7 +3,7 @@ import type { ProjectFile, ChatMessage, FileOperation, BlueprintFile } from '../
 const API_URL = 'https://nirkyy-testing.hf.space/api/generate';
 
 /**
- * Custom error for when the AI returns a conversational response instead of the expected JSON.
+ * Custom error for when the AI returns a conversational response instead of the expected format.
  */
 export class AIConversationalError extends Error {
   constructor(message: string) {
@@ -61,9 +61,6 @@ const parseJsonResponse = <T>(response: string): T => {
     try {
         // Remove markdown code blocks and trim whitespace
         let jsonString = response.replace(/```(json|text)?/g, '').trim();
-        
-        // Fix for AI sometimes over-escaping quotes (e.g., \\" instead of \")
-        jsonString = jsonString.replace(/\\"/g, '\\"');
 
         // Find the start of the JSON array. Handles cases where the AI adds conversational text before the JSON.
         const startIndex = jsonString.indexOf('[');
@@ -72,16 +69,33 @@ const parseJsonResponse = <T>(response: string): T => {
             throw new AIConversationalError(jsonString);
         }
 
-        // Find the matching closing bracket for the array. This handles cases with trailing text.
-        const lastIndex = jsonString.lastIndexOf(']');
-        if (lastIndex === -1 || lastIndex < startIndex) {
-             throw new Error("Struktur JSON tidak valid: kurung tutup array tidak ditemukan atau tidak pada tempatnya.");
+        // We'll work with the string from the first '[' onwards.
+        let potentialJson = jsonString.substring(startIndex);
+
+        // First, try to parse by finding the closing bracket, which handles well-formed JSON with trailing text.
+        const lastBracketIndex = potentialJson.lastIndexOf(']');
+        if (lastBracketIndex > -1) {
+            const completeJson = potentialJson.substring(0, lastBracketIndex + 1);
+            try {
+                return JSON.parse(completeJson) as T;
+            } catch (e) {
+                console.warn("Parsing complete JSON failed, attempting truncation recovery.", e);
+                // If it fails, proceed to the truncation recovery logic.
+            }
         }
         
-        // Extract only the part of the string that is likely to be valid JSON.
-        const potentialJson = jsonString.substring(startIndex, lastIndex + 1);
+        // Truncation recovery logic:
+        // Find the last '}' which likely indicates the end of the last complete object.
+        const lastBraceIndex = potentialJson.lastIndexOf('}');
+        if (lastBraceIndex > -1) {
+            // Assume the object it belongs to is complete and close the array.
+            const truncatedJson = potentialJson.substring(0, lastBraceIndex + 1) + ']';
+            return JSON.parse(truncatedJson) as T;
+        }
 
-        return JSON.parse(potentialJson) as T;
+        // If we reach here, we couldn't parse it normally and couldn't find a fallback.
+        throw new Error("Struktur JSON tidak valid: tidak ada objek atau array yang dapat diurai.");
+
     } catch (e) {
         if (e instanceof AIConversationalError) {
             throw e; // Re-throw conversational errors as they are expected behavior.
@@ -97,26 +111,36 @@ export const generateBlueprint = async (
     userGoal: string,
     files: ProjectFile[]
 ): Promise<BlueprintFile[]> => {
-    const systemPrompt = `Anda adalah AI perencana senior (Blueprint Agent). Berdasarkan permintaan pengguna dan file yang ada, buatlah rencana (blueprint) operasi file yang diperlukan. Jangan tulis kodenya. Cukup jelaskan apa yang akan dilakukan pada setiap file.
+    const systemPrompt = `Anda adalah AI perencana senior (Blueprint Agent) dengan spesialisasi dalam arsitektur front-end dan desain UI/UX kelas dunia. Tugas Anda adalah mengubah permintaan pengguna menjadi rencana (blueprint) operasi file yang terstruktur dengan baik dan siap untuk produksi. Jangan tulis kodenya.
 
-**ATURAN PENTING:**
+**PRINSIP PANDUAN UTAMA:**
+1.  **Kualitas Kode Produksi:** Selalu prioritaskan kode yang bersih, modular, dapat dipelihara, dan berperforma tinggi. Gunakan praktik terbaik modern. Pikirkan tentang skalabilitas jangka panjang.
+2.  **UI/UX yang Matang & Profesional:** Desain antarmuka yang tidak hanya fungsional tetapi juga indah secara estetika, responsif di semua perangkat, dapat diakses (accessibility-first), dan intuitif untuk pengguna akhir.
+3.  **Struktur File yang Logis:** Atur file dengan cara yang terstruktur dan masuk akal untuk produksi. Pisahkan komponen, logika, gaya, dan aset. Misalnya, gunakan direktori seperti \`src/components/\`, \`src/styles/\`, \`src/utils/\`.
+
+**ATURAN OUTPUT PENTING:**
 1.  **HANYA JSON:** Seluruh output Anda HARUS berupa array JSON yang valid. Jangan tambahkan teks atau penjelasan lain di luar JSON.
 2.  **FORMAT OBJEK:** Setiap objek dalam array harus memiliki properti berikut:
-    *   \`path\` (string): Path lengkap ke file (misalnya, 'src/components/Button.js').
+    *   \`path\` (string): Path lengkap ke file (misalnya, 'src/components/Button.js'). Gunakan struktur direktori yang baik.
     *   \`operation\` (string): Jenis operasi. HARUS salah satu dari 'CREATE', 'UPDATE', atau 'DELETE'.
-    *   \`description\` (string): Penjelasan SANGAT SINGKAT tentang tujuan file atau ringkasan perubahan.
+    *   \`description\` (string): Penjelasan SINGKAT tentang tujuan file atau ringkasan perubahan, dengan mempertimbangkan prinsip panduan di atas.
 
 **Contoh Respons JSON:**
 [
   {
     "path": "index.html",
     "operation": "UPDATE",
-    "description": "Menambahkan elemen kanvas untuk grafik dan menautkan file script baru."
+    "description": "Memperbarui struktur utama HTML untuk mendukung layout aplikasi modern."
   },
   {
-    "path": "chart.js",
+    "path": "src/styles/main.css",
     "operation": "CREATE",
-    "description": "File JavaScript baru untuk logika rendering grafik."
+    "description": "Membuat file CSS utama untuk variabel global, reset, dan gaya dasar."
+  },
+  {
+    "path": "src/components/Header.js",
+    "operation": "CREATE",
+    "description": "Membuat komponen Header yang dapat digunakan kembali untuk navigasi."
   }
 ]`;
 
@@ -133,52 +157,115 @@ Berdasarkan semua informasi di atas, hasilkan array JSON dari rencana Anda.
     return parseJsonResponse<BlueprintFile[]>(response);
 };
 
+/**
+ * Parses the AI's text response containing file blocks into a structured array.
+ */
+const parseFileContentResponse = (response: string): { path: string, content: string }[] => {
+    const operations: { path: string, content: string }[] = [];
+    const fileBlockRegex = /-- START OF (.*?) --\r?\n([\s\S]*?)\r?\n-- END --/g;
+    
+    let match;
+    while ((match = fileBlockRegex.exec(response)) !== null) {
+        const path = match[1].trim();
+        const content = match[2].trim(); 
+        if (path) { // Allow empty content
+            operations.push({ path, content });
+        }
+    }
+
+    if (operations.length === 0 && response.trim() !== "") {
+      // Throw an error if the AI responded but not in the expected format.
+      throw new AIConversationalError(`The AI's response could not be parsed. Please check the format. Raw response: \n\n${response}`);
+    }
+
+    return operations;
+};
 
 export const generateCodeFromBlueprint = async (
     userGoal: string,
     blueprint: BlueprintFile[],
     files: ProjectFile[]
 ): Promise<FileOperation[]> => {
-    const systemPrompt = `Anda adalah AI pembuat kode ahli (Coding Agent). Berdasarkan permintaan pengguna dan RENCANA yang diberikan, tulis KONTEN LENGKAP untuk semua file yang perlu dibuat atau diubah.
+    
+    // Separate blueprint operations: coding agent handles CREATE/UPDATE, DELETEs are handled directly.
+    const opsToCode = blueprint.filter(b => b.operation === 'CREATE' || b.operation === 'UPDATE');
+    const deleteOps: FileOperation[] = blueprint
+        .filter(b => b.operation === 'DELETE')
+        .map(b => ({
+            operation: 'DELETE',
+            path: b.path,
+            reasoning: b.description // Use blueprint description as reasoning
+        }));
 
-**ATURAN PENTING:**
-1.  **HANYA JSON:** Seluruh output Anda HARUS berupa array JSON yang valid dari objek FileOperation.
-2.  **KONTEN LENGKAP:** Untuk operasi 'CREATE' dan 'UPDATE', properti \`content\` HARUS berisi konten file LENGKAP, bukan hanya perubahannya.
-3.  **ESCAPE KARAKTER:** Di dalam string \`content\`, semua karakter baris baru HARUS di-escape sebagai \`\\n\`, dan semua karakter kutip ganda (") HARUS di-escape sebagai \`\\"\`.
-4.  **FORMAT OBJEK:** Setiap objek dalam array HARUS memiliki properti:
-    *   \`path\` (string): Path lengkap ke file.
-    *   \`operation\` (string): 'CREATE', 'UPDATE', atau 'DELETE'.
-    *   \`content\` (string, opsional): Konten file lengkap. Diperlukan untuk 'CREATE' dan 'UPDATE'.
-    *   \`reasoning\` (string): Alasan singkat untuk perubahan ini.
+    // If there are no files to create or update, return only the delete operations.
+    if (opsToCode.length === 0) {
+        return deleteOps;
+    }
 
-**Contoh Respons JSON:**
-[
-  {
-    "path": "index.html",
-    "operation": "UPDATE",
-    "content": "<!DOCTYPE html>\\n<html>\\n<head>...</head>\\n<body>\\n...\\n<canvas id=\\"myChart\\"></canvas>\\n<script src=\\"chart.js\\"></script>\\n</body>\\n</html>",
-    "reasoning": "Menambahkan elemen canvas dan menautkan file script baru sesuai rencana."
-  },
-  {
-    "path": "chart.js",
-    "operation": "CREATE",
-    "content": "console.log('Chart logic goes here');\\n// ...kode lengkap...",
-    "reasoning": "Membuat file baru untuk logika grafik seperti yang diminta dalam blueprint."
-  }
-]`;
+    const systemPrompt = `Anda adalah AI pembuat kode ahli (Coding Agent) yang berfokus pada kualitas produksi. Berdasarkan permintaan pengguna dan RENCANA yang diberikan, tulis KONTEN LENGKAP untuk semua file yang perlu dibuat atau diubah.
+
+**ATURAN OUTPUT PENTING:**
+1.  **HANYA TULIS KODE:** Jangan tambahkan penjelasan atau teks percakapan apa pun.
+2.  **FORMAT WAJIB:** Anda HARUS menyajikan setiap file dalam format berikut. Pastikan untuk menyertakan penanda awal dan akhir:
+    
+    -- START OF [path/lengkap/ke/file.ekstensi] --
+    [Konten file lengkap di sini...]
+    -- END --
+
+    Ulangi blok ini untuk setiap file yang perlu Anda tulis.
+
+**PRINSIP KODE UTAMA:**
+1.  **Kualitas Produksi:** Tulis kode yang bersih, efisien, dan mudah dibaca.
+2.  **UI/UX Modern:** Jika menulis kode UI (HTML/CSS/JS), pastikan hasilnya responsif, dapat diakses, dan secara visual menarik.
+3.  **Lengkap & Fungsional:** Kode yang Anda tulis harus lengkap dan siap pakai. Jangan gunakan placeholder.
+
+**Contoh Respons:**
+-- START OF index.html --
+<!DOCTYPE html>
+<html lang="en">
+<body>
+    <h1>Hello World</h1>
+</body>
+</html>
+-- END --
+-- START OF style.css --
+body { font-family: sans-serif; }
+-- END --
+`;
 
     const promptContext = `
 ${buildFileContext(files)}
 Tujuan Pengguna: "${userGoal}"
 
-Rencana (Blueprint) untuk diikuti:
-${JSON.stringify(blueprint, null, 2)}
+Rencana (Blueprint) untuk diikuti (hanya buat/perbarui file-file ini):
+${JSON.stringify(opsToCode, null, 2)}
 
-Sekarang, hasilkan array JSON dari operasi file dengan konten kode lengkap.
+Sekarang, hasilkan konten lengkap untuk file-file dalam format yang ditentukan.
 `;
 
     const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
 
     const response = await callAIAgent(fullPrompt);
-    return parseJsonResponse<FileOperation[]>(response);
+    
+    const parsedFileContents = parseFileContentResponse(response);
+    const parsedFileMap = new Map(parsedFileContents.map(p => [p.path, p.content]));
+    
+    const codeOps: FileOperation[] = [];
+
+    // Only create operations for files that were both in the blueprint and generated by the AI.
+    opsToCode.forEach(blueprintFile => {
+        if (parsedFileMap.has(blueprintFile.path)) {
+            codeOps.push({
+                operation: blueprintFile.operation as 'CREATE' | 'UPDATE',
+                path: blueprintFile.path,
+                content: parsedFileMap.get(blueprintFile.path),
+                reasoning: blueprintFile.description
+            });
+        } else {
+            console.warn(`AI did not generate content for the planned file: ${blueprintFile.path}. Skipping operation.`);
+        }
+    });
+    
+    // Combine the generated code operations with the deletion operations.
+    return [...codeOps, ...deleteOps];
 }
