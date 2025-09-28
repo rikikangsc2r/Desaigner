@@ -237,7 +237,7 @@ export const generateCodeFromBlueprint = async (
     [Konten file lengkap di sini...]
     -- END --
 
-    Ulangi blok ini untuk setiap file yang perlu Anda tulis.
+3.  **GENERASI LENGKAP (KRUSIAL):** Anda HARUS menghasilkan blok kode untuk SETIAP file yang tercantum dalam rencana. JANGAN melewatkan file apa pun. Jika rencananya memiliki 3 file, output Anda HARUS berisi 3 blok \`START OF...END\`.
 
 **PRINSIP KODE UTAMA:**
 1.  **Kualitas Produksi:** Tulis kode yang bersih, efisien, dan mudah dibaca.

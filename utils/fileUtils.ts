@@ -2,67 +2,54 @@ import type { ProjectFile } from '../types';
 
 declare const JSZip: any;
 
-const getMimeType = (path: string): string => {
-    if (path.endsWith('.html')) return 'text/html';
-    if (path.endsWith('.css')) return 'text/css';
-    if (path.endsWith('.js') || path.endsWith('.jsx') || path.endsWith('.tsx')) return 'application/javascript';
-    if (path.endsWith('.json')) return 'application/json';
-    if (path.endsWith('.png')) return 'image/png';
-    if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg';
-    if (path.endsWith('.svg')) return 'image/svg+xml';
-    return 'text/plain';
-};
-
 /**
- * Creates a sandboxed preview environment using Blob URLs.
- * This is more robust than srcDoc as it simulates a file system,
- * allowing scripts (including modules) to be loaded correctly.
+ * Creates a single HTML string for previewing in an iframe's srcdoc.
+ * It inlines all local CSS and JS files directly into the HTML.
  * @param files The project files.
- * @returns An object containing the URL for the main preview page and an array of all generated blob URLs for cleanup.
+ * @returns A single HTML string ready for preview.
  */
-export const createPreviewUrl = (files: ProjectFile[]): { previewUrl: string, blobUrls: string[] } => {
+export const createPreviewHtml = (files: ProjectFile[]): string => {
     const htmlFile = files.find(f => f.path.toLowerCase() === 'index.html');
     if (!htmlFile) {
-        const errorHtml = '<html><body><h1>No index.html file found.</h1></body></html>';
-        const blob = new Blob([errorHtml], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        return { previewUrl: url, blobUrls: [url] };
+        return '<html><body><h1>No index.html file found.</h1></body></html>';
     }
 
-    const fileMap = new Map<string, string>();
-    const blobUrls: string[] = [];
+    let content = htmlFile.content;
+    const fileMap = new Map(files.map(f => [f.path.replace(/^\.\//, ''), f]));
 
-    // Create blobs for all files except for the main index.html file
-    files.forEach(file => {
-        if (file.path.toLowerCase() !== 'index.html') {
-            const blob = new Blob([file.content], { type: getMimeType(file.path) });
-            const url = URL.createObjectURL(blob);
-            const relativePath = file.path.startsWith('/') ? file.path.substring(1) : file.path;
-            fileMap.set(relativePath, url);
-            blobUrls.push(url);
+    // Inline stylesheets
+    content = content.replace(/<link[^>]+?href="([^"]+)"[^>]*>/g, (match, path) => {
+        // Only replace local, non-http, stylesheet links
+        if (path.startsWith('http') || path.startsWith('//') || !match.includes('rel="stylesheet"')) {
+            return match;
         }
+        const cleanPath = path.replace(/^\.\//, '');
+        const cssFile = fileMap.get(cleanPath);
+        if (cssFile) {
+            return `<style>\n${cssFile.content}\n</style>`;
+        }
+        console.warn(`Could not find CSS file to inline: ${path}`);
+        return match;
     });
 
-    let content = htmlFile.content;
-
-    // Replace all relative paths in `src` and `href` attributes with blob URLs
-    content = content.replace(/(src|href)\s*=\s*["'](?!https?:\/\/|data:|blob:)(.*?)["']/g, (match, attr, path) => {
-        const cleanPath = path.startsWith('./') ? path.substring(2) : path;
-        if (fileMap.has(cleanPath)) {
-            return `${attr}="${fileMap.get(cleanPath)}"`;
+    // Inline scripts
+    content = content.replace(/<script[^>]+?src="([^"]+)"[^>]*>\s*<\/script>/g, (match, path) => {
+        // Only replace local, non-http scripts
+        if (path.startsWith('http') || path.startsWith('//')) {
+            return match;
         }
-        console.warn(`Could not find a file to match path in preview: ${path}`);
+        const cleanPath = path.replace(/^\.\//, '');
+        const jsFile = fileMap.get(cleanPath);
+        if (jsFile) {
+            // Reconstruct the script tag without src, preserving other attributes
+            const tagWithAttrs = match.substring(0, match.indexOf('>') + 1).replace(/src="[^"]+"/, '');
+            return `${tagWithAttrs}\n${jsFile.content}\n</script>`;
+        }
+        console.warn(`Could not find JS file to inline: ${path}`);
         return match;
     });
     
-    // Create the main blob for the modified index.html
-    const mainBlob = new Blob([content], { type: 'text/html' });
-    const previewUrl = URL.createObjectURL(mainBlob);
-    
-    // Add the main page's URL to the list for cleanup
-    blobUrls.push(previewUrl);
-
-    return { previewUrl, blobUrls };
+    return content;
 };
 
 
