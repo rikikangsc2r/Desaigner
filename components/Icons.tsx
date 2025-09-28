@@ -94,3 +94,11 @@ export const MaximizeIcon: React.FC<{className?: string}> = ({className}) => (
 export const MinimizeIcon: React.FC<{className?: string}> = ({className}) => (
     <svg {...iconProps} className={className || iconProps.className}><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" /></svg>
 );
+
+export const MenuIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg {...iconProps} className={className || iconProps.className}><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+);
+
+export const XIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg {...iconProps} className={className || iconProps.className}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+);

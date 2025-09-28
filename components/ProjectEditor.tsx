@@ -4,7 +4,7 @@ import type { Project, ProjectFile, ChatMessage, FileOperation, BlueprintFile, F
 import { getProject, saveProject } from '../services/projectService';
 import { runTaskingAgent, generateBlueprint, generateCodeFromBlueprint, AIConversationalError } from '../services/aiService';
 import { createProjectZip } from '../utils/fileUtils';
-import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon } from './Icons';
+import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, MenuIcon, XIcon } from './Icons';
 import { TypingIndicator } from './Loader';
 import FileTree from './FileTree';
 import CodeEditor from './CodeEditor';
@@ -96,6 +96,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [isEditorDirty, setIsEditorDirty] = useState(false);
   const [activeView, setActiveView] = useState<MobileView>('chat');
   const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const projectRef = useRef<Project | null>(null);
 
   useEffect(() => {
@@ -368,13 +369,64 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
   return (
     <div className="h-dynamic-screen w-screen flex flex-col bg-slate-900 overflow-hidden">
+        {isMobileMenuOpen && (
+            <div className="fixed inset-0 bg-slate-900 z-50 p-4 flex flex-col lg:hidden" role="dialog" aria-modal="true">
+                <div className="flex justify-between items-center mb-8">
+                    <h3 className="text-2xl font-bold text-slate-100">Menu</h3>
+                    <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 rounded-full hover:bg-slate-800">
+                        <XIcon />
+                    </button>
+                </div>
+                <nav className="flex flex-col gap-2 text-slate-200">
+                    {(['files', 'editor', 'chat'] as MobileView[]).map(view => {
+                        const isDisabled = view === 'editor' && !selectedFilePath;
+                        const getIcon = () => {
+                            if (view === 'files') return <CodeIcon />;
+                            if (view === 'editor') return <EditIcon />;
+                            return <BotIcon />;
+                        };
+                        return (
+                            <button
+                                key={view}
+                                disabled={isDisabled}
+                                onClick={() => {
+                                    setActiveView(view);
+                                    setIsMobileMenuOpen(false);
+                                }}
+                                className={`flex items-center gap-3 p-4 rounded-lg text-lg text-left transition-colors w-full disabled:opacity-50 disabled:cursor-not-allowed ${activeView === view ? 'bg-indigo-500/20 text-indigo-300 font-semibold' : 'hover:bg-slate-800'}`}
+                            >
+                                {getIcon()}
+                                <span className="capitalize">{view}</span>
+                            </button>
+                        )
+                    })}
+                </nav>
+                <div className="border-t border-slate-700 my-6"></div>
+                <button
+                    onClick={() => {
+                        onBack();
+                        setIsMobileMenuOpen(false);
+                    }}
+                    className="flex items-center gap-3 p-4 rounded-lg text-lg text-left transition-colors w-full hover:bg-slate-800 text-slate-200"
+                >
+                    <BackIcon />
+                    <span>Back to Projects</span>
+                </button>
+            </div>
+        )}
+
       <header className={`bg-slate-800 p-3 flex justify-between items-center border-b border-slate-700 flex-shrink-0 ${isEditorFullscreen ? 'hidden' : ''}`}>
-        <button onClick={onBack} className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors p-2 rounded-lg hover:bg-slate-700">
-          <BackIcon />
-          <span className="hidden sm:inline font-medium">Projects</span>
-        </button>
-        <h2 className="text-xl font-bold text-slate-100 truncate mx-4">{project.name}</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex-1">
+            <button onClick={onBack} className="hidden lg:flex items-center gap-2 text-slate-300 hover:text-white transition-colors p-2 rounded-lg hover:bg-slate-700">
+                <BackIcon />
+                <span className="font-medium">Projects</span>
+            </button>
+            <button onClick={() => setIsMobileMenuOpen(true)} className="lg:hidden p-2 -ml-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700">
+                <MenuIcon className="w-6 h-6"/>
+            </button>
+        </div>
+        <h2 className="text-xl font-bold text-slate-100 truncate mx-2 text-center">{project.name}</h2>
+        <div className="flex-1 flex justify-end items-center gap-2">
           <button onClick={handlePreview} title="Preview Website" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors">
             <EyeIcon />
           </button>
@@ -385,7 +437,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
       </header>
       <main className="flex-1 flex flex-col lg:grid lg:grid-cols-[minmax(250px,1fr)_3fr_2fr] gap-4 p-4 overflow-y-auto lg:overflow-hidden">
         
-        <aside className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'files' ? 'flex' : 'hidden'} flex-col bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl lg:flex`}>
+        <aside className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'files' ? 'flex' : 'hidden'} flex-1 flex-col bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl lg:flex`}>
           <h3 className="text-lg font-semibold mb-3 flex items-center gap-2 text-slate-200 flex-shrink-0 p-4 border-b border-slate-700">
               <CodeIcon />
               Project Files
@@ -395,7 +447,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
           </div>
         </aside>
 
-        <section className={`${isEditorFullscreen ? 'fixed inset-0 z-50 p-2 bg-slate-900' : 'lg:col-span-1'} ${activeView === 'editor' ? 'flex' : 'hidden'} flex-col gap-4 lg:flex min-h-0`}>
+        <section className={`${isEditorFullscreen ? 'fixed inset-0 z-50 p-2 bg-slate-900' : 'lg:col-span-1'} ${activeView === 'editor' ? 'flex' : 'hidden'} flex-1 flex-col gap-4 lg:flex min-h-0`}>
           {selectedFilePath ? (
             <CodeEditor
               filePath={selectedFilePath}
@@ -413,7 +465,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
           )}
         </section>
 
-        <section className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'chat' ? 'flex' : 'hidden'} flex-col gap-4 min-h-0 lg:flex lg:col-span-1`}>
+        <section className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'chat' ? 'flex' : 'hidden'} flex-1 flex-col gap-4 min-h-0 lg:flex lg:col-span-1`}>
             <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
             {error && <div className="text-red-400 bg-red-900/50 p-3 rounded-md text-sm">{error}</div>}
             <div className="flex gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
@@ -449,20 +501,6 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         </section>
       </main>
 
-      <nav className={`lg:hidden flex justify-around items-center p-2 bg-slate-800/80 backdrop-blur-sm border-t border-slate-700 flex-shrink-0 ${isEditorFullscreen ? 'hidden' : ''}`}>
-        <button onClick={() => setActiveView('files')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-24 ${activeView === 'files' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'}`}>
-            <CodeIcon className="w-6 h-6"/>
-            <span className="text-xs font-medium">Files</span>
-        </button>
-        <button onClick={() => setActiveView('editor')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-24 ${activeView === 'editor' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'} disabled:text-slate-600 disabled:cursor-not-allowed`} disabled={!selectedFilePath}>
-            <EditIcon className="w-6 h-6"/>
-            <span className="text-xs font-medium">Editor</span>
-        </button>
-        <button onClick={() => setActiveView('chat')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-24 ${activeView === 'chat' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'}`}>
-            <BotIcon className="w-6 h-6"/>
-            <span className="text-xs font-medium">Chat</span>
-        </button>
-      </nav>
     </div>
   );
 };
