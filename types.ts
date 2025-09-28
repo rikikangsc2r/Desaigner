@@ -14,16 +14,21 @@ export interface Project {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
 export type FileOperationType = 'CREATE' | 'UPDATE' | 'DELETE';
 
 export interface FileOperation {
-  // FIX: Renamed 'type' to 'operation' for consistency with the AI service response.
   operation: FileOperationType;
   path: string;
   content?: string; // content is optional for DELETE
-  reasoning: string;
+  reasoning?: string;
+}
+
+export interface BlueprintFile {
+  path: string;
+  operation: FileOperationType;
+  description: string;
 }

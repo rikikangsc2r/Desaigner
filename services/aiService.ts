@@ -1,10 +1,9 @@
-
-import type { Project, ChatMessage, ProjectFile, FileOperation, FileOperationType } from '../types';
+import type { ProjectFile, ChatMessage, FileOperation, BlueprintFile } from '../types';
 
 const API_URL = 'https://nirkyy-testing.hf.space/api/generate';
 
 /**
- * Custom error for when the AI returns a conversational response instead of file operations.
+ * Custom error for when the AI returns a conversational response instead of the expected JSON.
  */
 export class AIConversationalError extends Error {
   constructor(message: string) {
@@ -39,9 +38,7 @@ const callAIAgent = async (prompt: string): Promise<string> => {
         throw new Error('Respons API kosong');
     }
     
-    // The API might wrap the response in markdown code blocks.
-    // Let's remove them if they exist for robustness.
-    return answer.replace(/```(json|text|txt)?/g, '').trim();
+    return answer.trim();
 
   } catch (error) {
     console.error(`Kesalahan saat memanggil AI:`, error);
@@ -49,174 +46,139 @@ const callAIAgent = async (prompt: string): Promise<string> => {
   }
 };
 
-const buildFileContext = (existingFiles: ProjectFile[]): string => {
-  if (existingFiles.length === 0) {
-    return "Ini adalah proyek baru tanpa file yang ada.\n";
+const buildFileContext = (files: ProjectFile[]): string => {
+  if (files.length === 0) {
+    return "Proyek ini saat ini kosong. Tidak ada file yang ada.\n";
   }
-  let context = "Ini adalah file proyek saat ini:\n\n";
-  existingFiles.forEach(file => {
+  let context = "Ini adalah file-file yang ada dalam proyek saat ini:\n\n";
+  files.forEach(file => {
     context += `--- File: ${file.path} ---\n${file.content}\n\n`;
   });
   return context;
 };
 
-const parseOperationsResponse = (response: any): FileOperation[] => {
-    if (typeof response !== 'string') {
-        const errorMsg = `Respons AI bukan string. Diterima tipe ${typeof response}.`;
-        console.error(errorMsg, "Konten:", response);
-        throw new Error(errorMsg);
-    }
-
+const parseJsonResponse = <T>(response: string): T => {
     try {
-        // Clean up response: remove markdown code blocks if present and trim
-        const txtResponse = response.replace(/```(txt|text|json)?/g, '').trim();
+        // Remove markdown code blocks and trim whitespace
+        let jsonString = response.replace(/```(json|text)?/g, '').trim();
+        
+        // Fix for AI sometimes over-escaping quotes (e.g., \\" instead of \")
+        jsonString = jsonString.replace(/\\"/g, '\\"');
 
-        if (!txtResponse) {
-            return [];
+        // Find the start of the JSON array. Handles cases where the AI adds conversational text before the JSON.
+        const startIndex = jsonString.indexOf('[');
+        if (startIndex === -1) {
+            // If no array is found, assume the entire response is a conversational message.
+            throw new AIConversationalError(jsonString);
         }
 
-        // Heuristically check if the response is structured as expected. If not, it's a refusal or conversational reply.
-        // Expanded the check to include operation types directly.
-        const isStructuredResponse = /operation:|path:|reasoning:|CREATE|UPDATE|DELETE/i.test(txtResponse);
-        if (!isStructuredResponse) {
-            // This custom error will be caught in the UI to be displayed as a chat message.
-            throw new AIConversationalError(txtResponse);
+        // Find the matching closing bracket for the array. This handles cases with trailing text.
+        const lastIndex = jsonString.lastIndexOf(']');
+        if (lastIndex === -1 || lastIndex < startIndex) {
+             throw new Error("Struktur JSON tidak valid: kurung tutup array tidak ditemukan atau tidak pada tempatnya.");
         }
+        
+        // Extract only the part of the string that is likely to be valid JSON.
+        const potentialJson = jsonString.substring(startIndex, lastIndex + 1);
 
-        const operationBlocks = txtResponse.split(/^\s*--\s*$/m);
-        const operations: FileOperation[] = [];
-
-        operationBlocks.forEach((block, index) => {
-            const trimmedBlock = block.trim();
-            if (!trimmedBlock) return;
-
-            try {
-                const op: Partial<FileOperation> = {};
-
-                // Find content first and split the block. This is the most reliable delimiter.
-                let headerPart = trimmedBlock;
-                const contentIndex = trimmedBlock.toLowerCase().lastIndexOf('\ncontent:');
-                
-                if (contentIndex !== -1) {
-                    headerPart = trimmedBlock.substring(0, contentIndex).trim();
-                    op.content = trimmedBlock.substring(contentIndex + '\ncontent:'.length).trim();
-                } else {
-                    const inlineContentIndex = trimmedBlock.toLowerCase().lastIndexOf(' content:');
-                    if (inlineContentIndex > 0) { // Should not be at the very beginning
-                        headerPart = trimmedBlock.substring(0, inlineContentIndex).trim();
-                        op.content = trimmedBlock.substring(inlineContentIndex + ' content:'.length).trim();
-                    }
-                }
-                
-                // Normalize header part for easier parsing (replace newlines with spaces, add leading space for regex)
-                const normalizedHeader = ` ${headerPart.replace(/[\n\r]/g, ' ').trim()}`;
-                
-                // 1. Extract Operation
-                let match = normalizedHeader.match(/\soperation:\s*(CREATE|UPDATE|DELETE)/i);
-                if (match) {
-                    op.operation = match[1].toUpperCase() as FileOperationType;
-                } else {
-                    const firstWordMatch = normalizedHeader.match(/^\s*(CREATE|UPDATE|DELETE)\b/i);
-                    if (firstWordMatch) {
-                        op.operation = firstWordMatch[1].toUpperCase() as FileOperationType;
-                    }
-                }
-
-                // 2. Extract Path
-                match = normalizedHeader.match(/\spath:\s*(\S+)/i);
-                if (match) {
-                    op.path = match[1];
-                }
-
-                // 3. Extract Reasoning (make it robust against grabbing other keys)
-                match = normalizedHeader.match(/\sreasoning:\s*(.*)/i);
-                if (match) {
-                    let reasoning = match[1].trim();
-                    // The regex is greedy, so truncate the reasoning if it accidentally included other keys.
-                    const otherKeys = ['operation:', 'path:', 'content:'];
-                    let earliestIndex = reasoning.length;
-                    otherKeys.forEach(key => {
-                        const idx = reasoning.toLowerCase().indexOf(key);
-                        if (idx !== -1 && idx < earliestIndex) {
-                            earliestIndex = idx;
-                        }
-                    });
-                    op.reasoning = reasoning.substring(0, earliestIndex).trim();
-                }
-
-                // Final checks
-                if (op.operation === 'CREATE' || op.operation === 'UPDATE') {
-                    // content is optional for updates (e.g. rename), but here it must be defined.
-                    // If no content was found, default to empty string.
-                    op.content = op.content ?? '';
-                }
-
-                if (!op.operation || !op.path || !op.reasoning) {
-                    throw new Error(`Operasi tidak lengkap pada blok ${index}. Wajib ada 'operation', 'path', dan 'reasoning'. Blok: "${block}"`);
-                }
-
-                operations.push(op as FileOperation);
-
-            } catch (e) {
-                if (e instanceof AIConversationalError) throw e;
-                console.error("Gagal mengurai blok operasi AI:", e, "Blok Asli:", block);
-                // Re-throw with more context
-                throw new Error(`Gagal mengurai respons teks AI: ${(e as Error).message}`);
-            }
-        });
-
-        return operations;
-
+        return JSON.parse(potentialJson) as T;
     } catch (e) {
-        // Re-throw our custom error directly so it's not wrapped in another error message.
         if (e instanceof AIConversationalError) {
-            throw e;
+            throw e; // Re-throw conversational errors as they are expected behavior.
         }
-        console.error("Gagal mengurai respons teks AI:", e, "Teks Asli:", response);
-        throw new Error(`Gagal mengurai respons teks AI: ${(e as Error).message}`);
+        // For actual parsing errors, provide a more user-friendly message.
+        console.error("Gagal mengurai respons JSON dari AI:", e, "Teks Asli:", response);
+        throw new AIConversationalError(`Maaf, saya mengalami masalah saat memformat respons saya. Coba sederhanakan permintaan Anda atau coba lagi.`);
     }
-};
+}
 
-export const generateFileOperations = async (
-    userRequest: string,
-    files: ProjectFile[],
-    projectIdentifier: string // No longer used by the new API, but kept for signature compatibility
-): Promise<FileOperation[]> => {
-    const systemPrompt = `Anda adalah seorang AI pengembang web otonom yang ahli. Tugas Anda adalah membantu pengguna membangun dan memodifikasi situs web standar HTML, CSS, dan JavaScript.
 
-Anda akan diberi permintaan pengguna dan keadaan lengkap file proyek.
-Berdasarkan informasi ini, Anda harus menentukan operasi file yang diperlukan (CREATE, UPDATE, DELETE) untuk memenuhi permintaan tersebut.
+export const generateBlueprint = async (
+    userGoal: string,
+    files: ProjectFile[]
+): Promise<BlueprintFile[]> => {
+    const systemPrompt = `Anda adalah AI perencana senior (Blueprint Agent). Berdasarkan permintaan pengguna dan file yang ada, buatlah rencana (blueprint) operasi file yang diperlukan. Jangan tulis kodenya. Cukup jelaskan apa yang akan dilakukan pada setiap file.
 
-Anda HARUS merespons HANYA dalam format teks biasa (plain text) yang terstruktur. Jangan sertakan teks lain, penjelasan, atau format markdown di luar format yang ditentukan.
+**ATURAN PENTING:**
+1.  **HANYA JSON:** Seluruh output Anda HARUS berupa array JSON yang valid. Jangan tambahkan teks atau penjelasan lain di luar JSON.
+2.  **FORMAT OBJEK:** Setiap objek dalam array harus memiliki properti berikut:
+    *   \`path\` (string): Path lengkap ke file (misalnya, 'src/components/Button.js').
+    *   \`operation\` (string): Jenis operasi. HARUS salah satu dari 'CREATE', 'UPDATE', atau 'DELETE'.
+    *   \`description\` (string): Penjelasan SANGAT SINGKAT tentang tujuan file atau ringkasan perubahan.
 
-Setiap operasi file harus dipisahkan oleh baris yang hanya berisi "--".
-
-Struktur untuk setiap operasi adalah sebagai berikut:
-operation: [CREATE|UPDATE|DELETE]
-path: [path/to/file.ext]
-reasoning: [Penjelasan singkat satu kalimat mengapa operasi ini diperlukan.]
-content:
-[...konten file lengkap di sini...]
-
-ATURAN PENTING:
-1.  **HANYA Teks Terstruktur**: Seluruh respons Anda harus berupa teks biasa yang mengikuti format yang ditentukan.
-2.  **Pemisah**: Gunakan baris yang hanya berisi "--" untuk memisahkan setiap operasi file. Jangan letakkan "--" di akhir operasi terakhir.
-3.  **Konten Lengkap**: Untuk CREATE dan UPDATE, letakkan konten file *seluruhnya* setelah baris "content:". Jangan berikan diff atau kode parsial. Untuk DELETE, abaikan baris "content:" dan kontennya.
-4.  **Format Ketat**: Setiap baris kunci (operation, path, reasoning, content) harus diikuti oleh titik dua dan spasi, lalu nilainya. Baris "content:" harus diikuti oleh baris baru, lalu konten file yang sebenarnya.
-5.  **Sederhana**: Tetap gunakan HTML, CSS, dan JS standar. Jangan gunakan kerangka kerja yang kompleks kecuali diminta secara eksplisit.
-6.  **Efisien**: Gabungkan perubahan ke dalam satu operasi jika memungkinkan.
-7.  **Konteks adalah Kunci**: Analisis file yang ada untuk memahami struktur proyek dan buat modifikasi yang cerdas. Jika sebuah file sudah ada, operasinya harus "UPDATE", bukan "CREATE".
-8.  **Path File**: Gunakan struktur file yang datar dan sederhana kecuali struktur direktori diminta secara eksplisit (mis., 'styles/main.css').`;
+**Contoh Respons JSON:**
+[
+  {
+    "path": "index.html",
+    "operation": "UPDATE",
+    "description": "Menambahkan elemen kanvas untuk grafik dan menautkan file script baru."
+  },
+  {
+    "path": "chart.js",
+    "operation": "CREATE",
+    "description": "File JavaScript baru untuk logika rendering grafik."
+  }
+]`;
 
     const promptContext = `
 ${buildFileContext(files)}
-Permintaan Pengguna: "${userRequest}"
+Tujuan Pengguna: "${userGoal}"
 
-Berdasarkan semua informasi di atas, silakan hasilkan blok teks dari operasi file untuk memenuhi permintaan pengguna.
+Berdasarkan semua informasi di atas, hasilkan array JSON dari rencana Anda.
 `;
     
     const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
     
     const response = await callAIAgent(fullPrompt);
-    return parseOperationsResponse(response);
+    return parseJsonResponse<BlueprintFile[]>(response);
 };
+
+
+export const generateCodeFromBlueprint = async (
+    userGoal: string,
+    blueprint: BlueprintFile[],
+    files: ProjectFile[]
+): Promise<FileOperation[]> => {
+    const systemPrompt = `Anda adalah AI pembuat kode ahli (Coding Agent). Berdasarkan permintaan pengguna dan RENCANA yang diberikan, tulis KONTEN LENGKAP untuk semua file yang perlu dibuat atau diubah.
+
+**ATURAN PENTING:**
+1.  **HANYA JSON:** Seluruh output Anda HARUS berupa array JSON yang valid dari objek FileOperation.
+2.  **KONTEN LENGKAP:** Untuk operasi 'CREATE' dan 'UPDATE', properti \`content\` HARUS berisi konten file LENGKAP, bukan hanya perubahannya.
+3.  **ESCAPE KARAKTER:** Di dalam string \`content\`, semua karakter baris baru HARUS di-escape sebagai \`\\n\`, dan semua karakter kutip ganda (") HARUS di-escape sebagai \`\\"\`.
+4.  **FORMAT OBJEK:** Setiap objek dalam array HARUS memiliki properti:
+    *   \`path\` (string): Path lengkap ke file.
+    *   \`operation\` (string): 'CREATE', 'UPDATE', atau 'DELETE'.
+    *   \`content\` (string, opsional): Konten file lengkap. Diperlukan untuk 'CREATE' dan 'UPDATE'.
+    *   \`reasoning\` (string): Alasan singkat untuk perubahan ini.
+
+**Contoh Respons JSON:**
+[
+  {
+    "path": "index.html",
+    "operation": "UPDATE",
+    "content": "<!DOCTYPE html>\\n<html>\\n<head>...</head>\\n<body>\\n...\\n<canvas id=\\"myChart\\"></canvas>\\n<script src=\\"chart.js\\"></script>\\n</body>\\n</html>",
+    "reasoning": "Menambahkan elemen canvas dan menautkan file script baru sesuai rencana."
+  },
+  {
+    "path": "chart.js",
+    "operation": "CREATE",
+    "content": "console.log('Chart logic goes here');\\n// ...kode lengkap...",
+    "reasoning": "Membuat file baru untuk logika grafik seperti yang diminta dalam blueprint."
+  }
+]`;
+
+    const promptContext = `
+${buildFileContext(files)}
+Tujuan Pengguna: "${userGoal}"
+
+Rencana (Blueprint) untuk diikuti:
+${JSON.stringify(blueprint, null, 2)}
+
+Sekarang, hasilkan array JSON dari operasi file dengan konten kode lengkap.
+`;
+
+    const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
+
+    const response = await callAIAgent(fullPrompt);
+    return parseJsonResponse<FileOperation[]>(response);
+}

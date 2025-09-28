@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
+import type { Project, ProjectFile, ChatMessage, FileOperation, BlueprintFile } from '../types';
 import { getProject, saveProject } from '../services/projectService';
-import { generateFileOperations, AIConversationalError } from '../services/aiService';
+import { generateBlueprint, generateCodeFromBlueprint, AIConversationalError } from '../services/aiService';
 import { createProjectZip } from '../utils/fileUtils';
 import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon } from './Icons';
 import { TypingIndicator } from './Loader';
@@ -15,14 +16,16 @@ interface ProjectEditorProps {
 
 type MobileView = 'files' | 'editor' | 'chat';
 
-// FIX: Updated function to use 'operation' property instead of 'type' for consistency.
 const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): ProjectFile[] => {
   let updatedFiles = [...currentFiles];
   const { operation: opType, path, content = '' } = operation;
+  
+  const fileExists = updatedFiles.some(f => f.path === path);
 
   switch (opType) {
     case 'CREATE':
-      if (updatedFiles.some(f => f.path === path)) {
+      if (fileExists) {
+        // If file exists, treat CREATE as an UPDATE to be safe
         updatedFiles = updatedFiles.map(f =>
           f.path === path ? { ...f, content } : f
         );
@@ -31,9 +34,14 @@ const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): 
       }
       break;
     case 'UPDATE':
-      updatedFiles = updatedFiles.map(f =>
-        f.path === path ? { ...f, content } : f
-      );
+       if (!fileExists) {
+        // If file doesn't exist, treat UPDATE as a CREATE
+         updatedFiles.push({ path, content });
+       } else {
+         updatedFiles = updatedFiles.map(f =>
+          f.path === path ? { ...f, content } : f
+        );
+       }
       break;
     case 'DELETE':
       updatedFiles = updatedFiles.filter(f => f.path !== path);
@@ -54,7 +62,7 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
     return (
         <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl flex-1 flex flex-col overflow-hidden">
             <div className="flex-1 space-y-4 overflow-y-auto p-4">
-                {chatHistory.map((msg, index) => (
+                {chatHistory.filter(msg => msg.role !== 'system').map((msg, index) => (
                     <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                         {msg.role === 'assistant' && (
                            <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30">
@@ -88,6 +96,12 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [isEditorDirty, setIsEditorDirty] = useState(false);
   const [activeView, setActiveView] = useState<MobileView>('chat');
   const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
+  const projectRef = useRef<Project | null>(null);
+
+  useEffect(() => {
+      projectRef.current = project;
+  }, [project]);
+
 
   useEffect(() => {
     getProject(projectId).then(p => {
@@ -158,104 +172,90 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
   const handleSendMessage = useCallback(async () => {
     if (!userInput.trim() || !project) return;
-    
+
     if (isEditorDirty) {
-      if (confirm('Anda memiliki perubahan yang belum disimpan di editor. Simpan sebelum mengirim pesan?')) {
-        await handleSaveFile();
-      }
+        if (confirm('Anda memiliki perubahan yang belum disimpan di editor. Simpan sebelum mengirim pesan?')) {
+            await handleSaveFile();
+        }
     }
 
     const userMessage: ChatMessage = { role: 'user', content: userInput };
-    const initialUserPrompt = userInput;
+    const userGoal = userInput;
     setUserInput('');
     setIsLoading(true);
     setError(null);
     
-    let currentProjectState = project;
-
-    setProject(p => {
-        const newProject = { ...p!, chatHistory: [...p!.chatHistory, userMessage] };
-        currentProjectState = newProject;
-        saveProject(newProject);
-        return newProject;
-    });
-    
-    const projectIdentifier = `${project.name.replace(/\s+/g, '_')}-${project.currentSessionId}`;
-
-    const addMessage = async (content: string) => {
-        const newMessage: ChatMessage = { role: 'assistant', content };
-        setProject(p => {
-            const newProject = { ...p!, chatHistory: [...p!.chatHistory, newMessage] };
-            currentProjectState = newProject;
-            saveProject(newProject);
-            return newProject;
+    // Use a function to update state to ensure we're always working with the latest state
+    const updateProjectState = (updater: (p: Project) => Project) => {
+        setProject(prevProject => {
+            if (!prevProject) return null;
+            const newState = updater(prevProject);
+            projectRef.current = newState; // Keep ref in sync
+            return newState;
         });
-        await new Promise(r => setTimeout(r, 100));
     };
 
-    const executeOperation = async (operation: FileOperation) => {
-        setProject(p => {
-            const newFiles = applyOperation(p!.files, operation);
-            const newProject = { ...p!, files: newFiles, updatedAt: Date.now() };
-            currentProjectState = newProject;
-
-            if (selectedFilePath) {
-                const opForSelectedFile = operation.path === selectedFilePath;
-                if (opForSelectedFile) {
-                    if (operation.operation === 'DELETE') {
-                        setSelectedFilePath(null);
-                        setEditorContent('');
-                    } else if (operation.content !== undefined) {
-                        setEditorContent(operation.content);
-                    }
-                    setIsEditorDirty(false);
-                }
-            }
-
-            saveProject(newProject);
-            return newProject;
-        });
-    }
+    updateProjectState(p => ({ ...p, chatHistory: [...p.chatHistory, userMessage] }));
 
     try {
-      await addMessage("Tentu, saya sedang menganalisis permintaan Anda dan menyiapkan perubahannya...");
-      
-      const operations = await generateFileOperations(
-          initialUserPrompt,
-          currentProjectState.files,
-          projectIdentifier
-      );
+        // Agent 1: Generate Blueprint
+        const blueprint = await generateBlueprint(userGoal, projectRef.current!.files);
 
-      if (operations.length === 0) {
-        await addMessage("Sepertinya tidak ada perubahan file yang diperlukan untuk permintaan Anda. Ada lagi yang bisa saya bantu?");
-        setIsLoading(false);
-        return;
-      }
+        const blueprintMessageContent = "Baik, saya mengerti. Berikut adalah rencana saya:\n\n" +
+            blueprint.map(b => `*   **${b.operation}** \`${b.path}\` - ${b.description}`).join('\n');
+        
+        updateProjectState(p => ({
+            ...p,
+            chatHistory: [...p.chatHistory, { role: 'assistant', content: blueprintMessageContent }]
+        }));
 
-      const planSummary = operations.map(op => `• **${op.operation}**: \`${op.path}\` - *${op.reasoning}*`).join('\n');
-      await addMessage(`Baik, saya telah merencanakan perubahan berikut:\n${planSummary}`);
-      await addMessage("Sekarang saya akan menerapkan perubahan ini...");
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Small delay for UX
 
-      for (const op of operations) {
-          await executeOperation(op);
-          await addMessage(`Selesai: **${op.operation}** \`${op.path}\``);
-          await new Promise(r => setTimeout(r, 100));
-      }
-      
-      await addMessage("Semua perubahan telah selesai! Anda dapat meninjau file atau melihat pratinjau situs web.");
+        updateProjectState(p => ({
+            ...p,
+            chatHistory: [...p.chatHistory, { role: 'assistant', content: "Sekarang saya akan menulis kodenya..." }]
+        }));
 
+        // Agent 2: Generate Code from Blueprint
+        const operations = await generateCodeFromBlueprint(userGoal, blueprint, projectRef.current!.files);
+        
+        let currentFiles = projectRef.current!.files;
+        for (const op of operations) {
+            currentFiles = applyOperation(currentFiles, op);
+            
+            // Update editor if the selected file was changed
+            if (op.path === selectedFilePath) {
+                if(op.operation === 'DELETE') {
+                    setSelectedFilePath(null);
+                    setEditorContent('');
+                } else {
+                    setEditorContent(op.content ?? '');
+                }
+                setIsEditorDirty(false);
+            }
+        }
+        
+        updateProjectState(p => ({
+            ...p,
+            files: currentFiles,
+            updatedAt: Date.now(),
+        }));
+
+        // FIX: Explicitly type successMessage as ChatMessage to prevent type widening of the 'role' property.
+        const successMessage: ChatMessage = { role: 'assistant', content: `Selesai! Saya telah melakukan ${operations.length} perubahan pada file proyek.` };
+        updateProjectState(p => ({ ...p, chatHistory: [...p.chatHistory, successMessage] }));
+    
     } catch (err) {
-      if (err instanceof AIConversationalError) {
-        await addMessage(err.message);
-      } else {
         const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
         setError(`Gagal mendapatkan respons dari AI: ${errorMessage}`);
-        await addMessage(`Maaf, terjadi kesalahan: ${errorMessage}`);
-      }
+        const finalMessage: ChatMessage = { role: 'assistant', content: `Maaf, terjadi kesalahan: ${errorMessage}` };
+        updateProjectState(p => ({ ...p, chatHistory: [...p.chatHistory, finalMessage] }));
     } finally {
-      setIsLoading(false);
+        setIsLoading(false);
+        if (projectRef.current) {
+            await saveProject(projectRef.current);
+        }
     }
-
   }, [project, userInput, isEditorDirty, selectedFilePath, handleSaveFile]);
 
   const handleNewChat = useCallback(async () => {
