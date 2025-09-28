@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import ProjectList from './components/ProjectList';
 import ProjectEditor from './components/ProjectEditor';
@@ -42,7 +41,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="bg-slate-900 min-h-screen font-sans text-slate-100">
+    <div className="bg-slate-900 min-h-screen font-sans text-slate-200">
       {route.name === 'editor' && route.projectId ? (
         <ProjectEditor projectId={route.projectId} onBack={handleBackToList} />
       ) : (

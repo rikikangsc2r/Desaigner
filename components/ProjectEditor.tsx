@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
 import { getProject, saveProject } from '../services/projectService';
@@ -53,20 +52,26 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
     }, [chatHistory, isLoading]);
 
     return (
-        <div className="bg-slate-800 rounded-lg flex-1 flex flex-col overflow-hidden">
+        <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl flex-1 flex flex-col overflow-hidden">
             <div className="flex-1 space-y-4 overflow-y-auto p-4">
                 {chatHistory.map((msg, index) => (
                     <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                         {msg.role === 'assistant' && (
-                           <BotIcon className="w-6 h-6 text-indigo-400 flex-shrink-0 mt-1" />
+                           <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30">
+                             <BotIcon className="w-5 h-5 text-indigo-400" />
+                           </div>
                         )}
-                        <div className={`max-w-full lg:max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
+                        <div className={`max-w-[85%] lg:max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
                             <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 font-mono text-sm">$1</code>') }}></p>
                         </div>
-                        {msg.role === 'user' && <UserIcon className="w-6 h-6 text-slate-400 flex-shrink-0 mt-1" />}
+                        {msg.role === 'user' && (
+                          <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0 mt-1">
+                            <UserIcon className="w-5 h-5 text-slate-300" />
+                          </div>
+                        )}
                     </div>
                 ))}
-                {isLoading && <div className="flex items-start gap-3"><BotIcon className="w-6 h-6 text-indigo-400 flex-shrink-0 mt-1" /><TypingIndicator/></div>}
+                {isLoading && <div className="flex items-start gap-3"><div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30"><BotIcon className="w-5 h-5 text-indigo-400" /></div><TypingIndicator/></div>}
                 <div ref={chatEndRef} />
             </div>
         </div>
@@ -166,10 +171,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     setIsLoading(true);
     setError(null);
     
-    // Use a function to get the latest project state for the AI call
     let currentProjectState = project;
 
-    // Add user message to chat and save
     setProject(p => {
         const newProject = { ...p!, chatHistory: [...p!.chatHistory, userMessage] };
         currentProjectState = newProject;
@@ -179,7 +182,6 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     
     const projectIdentifier = `${project.name.replace(/\s+/g, '_')}-${project.currentSessionId}`;
 
-    // Helper to add messages and update state
     const addMessage = async (content: string) => {
         const newMessage: ChatMessage = { role: 'assistant', content };
         setProject(p => {
@@ -188,10 +190,9 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
             saveProject(newProject);
             return newProject;
         });
-        await new Promise(r => setTimeout(r, 100)); // Short delay for UI update
+        await new Promise(r => setTimeout(r, 100));
     };
 
-    // Helper to apply operation and update state
     const executeOperation = async (operation: FileOperation) => {
         setProject(p => {
             const newFiles = applyOperation(p!.files, operation);
@@ -245,10 +246,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
     } catch (err) {
       if (err instanceof AIConversationalError) {
-        // The AI responded conversationally (e.g., a refusal). Add its message to the chat.
         await addMessage(err.message);
       } else {
-        // Handle all other errors as before
         const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
         setError(`Gagal mendapatkan respons dari AI: ${errorMessage}`);
         await addMessage(`Maaf, terjadi kesalahan: ${errorMessage}`);
@@ -275,8 +274,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
   const handlePreview = () => {
     if (project && project.files.length > 0) {
-      const previewUrl = `/#/preview/${project.id}`;
-      window.open(previewUrl, '_blank');
+      window.open(`/#/preview/${project.id}`, '_blank');
     } else {
       alert('Tidak ada file untuk dipratinjau.');
     }
@@ -316,42 +314,42 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   }
   
   if (!project) return (
-      <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-900">
-          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-slate-300 mb-4"></div>
-          <p className="text-slate-300">Memuat proyek...</p>
+      <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-950">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-500 mb-4"></div>
+          <p className="text-slate-300">Loading Project...</p>
       </div>
   );
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-900">
-      <header className={`bg-slate-800/50 backdrop-blur-sm p-3 flex justify-between items-center border-b border-slate-700 flex-shrink-0 ${isEditorFullscreen ? 'hidden' : ''}`}>
-        <button onClick={onBack} className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors p-2 rounded-md">
+    <div className="h-screen w-screen flex flex-col bg-slate-900 overflow-hidden">
+      <header className={`bg-slate-800 p-3 flex justify-between items-center border-b border-slate-700 flex-shrink-0 ${isEditorFullscreen ? 'hidden' : ''}`}>
+        <button onClick={onBack} className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors p-2 rounded-lg hover:bg-slate-700">
           <BackIcon />
-          <span className="hidden sm:inline">Kembali ke Proyek</span>
+          <span className="hidden sm:inline font-medium">Projects</span>
         </button>
-        <h2 className="text-xl font-bold text-slate-100 truncate">{project.name}</h2>
+        <h2 className="text-xl font-bold text-slate-100 truncate mx-4">{project.name}</h2>
         <div className="flex items-center gap-2">
-          <button onClick={handlePreview} title="Pratinjau Situs Web" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors">
+          <button onClick={handlePreview} title="Preview Website" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors">
             <EyeIcon />
           </button>
-          <button onClick={handleDownload} title="Unduh Proyek" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors">
+          <button onClick={handleDownload} title="Download Project" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors">
             <DownloadIcon />
           </button>
         </div>
       </header>
-      <main className="flex-1 flex flex-col lg:grid lg:grid-cols-5 gap-4 p-4 overflow-y-auto lg:overflow-hidden">
+      <main className="flex-1 flex flex-col lg:grid lg:grid-cols-[minmax(250px,1fr)_3fr_2fr] gap-4 p-4 overflow-y-auto lg:overflow-hidden">
         
-        <aside className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'files' ? 'flex' : 'hidden'} flex-col bg-slate-800 rounded-lg p-4 lg:flex lg:col-span-1`}>
-          <h3 className="text-lg font-semibold mb-3 flex items-center gap-2 text-slate-300 flex-shrink-0">
+        <aside className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'files' ? 'flex' : 'hidden'} flex-col bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl lg:flex`}>
+          <h3 className="text-lg font-semibold mb-3 flex items-center gap-2 text-slate-200 flex-shrink-0 p-4 border-b border-slate-700">
               <CodeIcon />
-              File Proyek
+              Project Files
           </h3>
-          <div className="flex-grow overflow-y-auto">
+          <div className="flex-grow overflow-y-auto p-2">
              <FileTree files={project.files} onSelectFile={handleSelectFile} selectedFile={selectedFilePath} />
           </div>
         </aside>
 
-        <section className={`${isEditorFullscreen ? 'fixed inset-0 z-50 p-2 bg-slate-900' : 'lg:col-span-3'} ${activeView === 'editor' ? 'flex' : 'hidden'} flex-col gap-4 lg:flex`}>
+        <section className={`${isEditorFullscreen ? 'fixed inset-0 z-50 p-2 bg-slate-900' : 'lg:col-span-1'} ${activeView === 'editor' ? 'flex' : 'hidden'} flex-col gap-4 lg:flex min-h-0`}>
           {selectedFilePath ? (
             <CodeEditor
               filePath={selectedFilePath}
@@ -363,8 +361,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
               onToggleFullScreen={() => setIsEditorFullscreen(p => !p)}
             />
           ) : (
-            <div className="flex-1 flex justify-center items-center bg-slate-800 rounded-lg">
-              <p className="text-slate-400">Pilih file untuk dilihat atau diedit</p>
+            <div className="flex-1 flex justify-center items-center bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl">
+              <p className="text-slate-400">Select a file to view or edit</p>
             </div>
           )}
         </section>
@@ -372,13 +370,13 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         <section className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'chat' ? 'flex' : 'hidden'} flex-col gap-4 min-h-0 lg:flex lg:col-span-1`}>
             <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
             {error && <div className="text-red-400 bg-red-900/50 p-3 rounded-md text-sm">{error}</div>}
-            <div className="flex items-center gap-2 p-2 bg-slate-800 rounded-lg">
+            <div className="flex items-start gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
                 <textarea
                     value={userInput}
                     onChange={(e) => setUserInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
-                    placeholder="Jelaskan perubahan Anda..."
-                    className="flex-1 bg-slate-700 border border-slate-600 text-slate-100 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                    placeholder="Describe your changes..."
+                    className="flex-1 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                     rows={2}
                     disabled={isLoading}
                 />
@@ -387,7 +385,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                         onClick={handleSendMessage}
                         disabled={isLoading || !userInput.trim()}
                         className="p-3 bg-indigo-600 text-white rounded-lg disabled:bg-slate-600 disabled:cursor-not-allowed hover:bg-indigo-500 transition-all"
-                        aria-label="Kirim pesan"
+                        aria-label="Send message"
                     >
                         <SendIcon className="w-5 h-5" />
                     </button>
@@ -395,7 +393,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                         onClick={handleNewChat}
                         disabled={isLoading}
                         className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all"
-                        aria-label="Mulai obrolan baru"
+                        aria-label="Start new chat"
                         title="New Chat"
                     >
                         <RefreshIcon className="w-5 h-5" />
@@ -406,20 +404,19 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
       </main>
 
       <nav className={`lg:hidden flex justify-around items-center p-2 bg-slate-800/80 backdrop-blur-sm border-t border-slate-700 flex-shrink-0 ${isEditorFullscreen ? 'hidden' : ''}`}>
-        <button onClick={() => setActiveView('files')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-20 ${activeView === 'files' ? 'text-indigo-400' : 'text-slate-400 hover:text-white'}`}>
+        <button onClick={() => setActiveView('files')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-24 ${activeView === 'files' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'}`}>
             <CodeIcon className="w-6 h-6"/>
             <span className="text-xs font-medium">Files</span>
         </button>
-        <button onClick={() => setActiveView('editor')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-20 ${activeView === 'editor' ? 'text-indigo-400' : 'text-slate-400 hover:text-white'} disabled:text-slate-600 disabled:cursor-not-allowed`} disabled={!selectedFilePath}>
+        <button onClick={() => setActiveView('editor')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-24 ${activeView === 'editor' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'} disabled:text-slate-600 disabled:cursor-not-allowed`} disabled={!selectedFilePath}>
             <EditIcon className="w-6 h-6"/>
             <span className="text-xs font-medium">Editor</span>
         </button>
-        <button onClick={() => setActiveView('chat')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-20 ${activeView === 'chat' ? 'text-indigo-400' : 'text-slate-400 hover:text-white'}`}>
+        <button onClick={() => setActiveView('chat')} className={`flex flex-col items-center gap-1 p-2 rounded-md transition-colors w-24 ${activeView === 'chat' ? 'text-indigo-400 bg-indigo-500/10' : 'text-slate-400 hover:text-white'}`}>
             <BotIcon className="w-6 h-6"/>
             <span className="text-xs font-medium">Chat</span>
         </button>
       </nav>
-
     </div>
   );
 };

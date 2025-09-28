@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import type { Project } from '../types';
 import { getProject } from '../services/projectService';
@@ -33,17 +32,17 @@ const ProjectPreview: React.FC<ProjectPreviewProps> = ({ projectId }) => {
     
     if (isLoading) {
         return (
-            <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-900">
-                <Loader />
-                <p className="mt-4 text-slate-300">Loading Preview...</p>
+            <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-950">
+                <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-500 mb-4"></div>
+                <p className="mt-4 text-slate-300 text-lg">Loading Preview...</p>
             </div>
         );
     }
     
     if (error || !project) {
          return (
-            <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-900">
-                <p className="text-red-400">{error || 'Project could not be loaded.'}</p>
+            <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-950 p-4">
+                <p className="text-red-400 text-center">{error || 'Project could not be loaded.'}</p>
             </div>
         );
     }
@@ -54,7 +53,7 @@ const ProjectPreview: React.FC<ProjectPreviewProps> = ({ projectId }) => {
         <iframe
             srcDoc={previewContent}
             title={`Preview of ${project.name}`}
-            className="w-full h-screen border-none"
+            className="w-full h-screen border-none bg-white"
             sandbox="allow-scripts allow-same-origin"
         />
     );

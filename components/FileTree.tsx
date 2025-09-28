@@ -57,11 +57,11 @@ const TreeItem: React.FC<{
             <div>
                 <div 
                     onClick={() => setIsOpen(!isOpen)} 
-                    className="flex items-center cursor-pointer p-1 rounded hover:bg-slate-700"
-                    style={{ paddingLeft: `${level * 16}px` }}
+                    className="flex items-center cursor-pointer p-2 rounded-md hover:bg-slate-700/70 transition-colors"
+                    style={{ paddingLeft: `${level * 16 + 8}px` }}
                 >
-                    {isOpen ? <FolderOpenIcon className="w-4 h-4 mr-2 text-indigo-400" /> : <FolderIcon className="w-4 h-4 mr-2 text-indigo-400" />}
-                    <span className="text-slate-300">{node.name}</span>
+                    {isOpen ? <FolderOpenIcon className="w-5 h-5 mr-2 text-indigo-400 flex-shrink-0" /> : <FolderIcon className="w-5 h-5 mr-2 text-indigo-400 flex-shrink-0" />}
+                    <span className="text-slate-300 font-medium text-sm">{node.name}</span>
                 </div>
                 {isOpen && node.children && (
                     <div>
@@ -81,11 +81,11 @@ const TreeItem: React.FC<{
     return (
         <div 
             onClick={() => onSelectFile(node.path)} 
-            className={`flex items-center cursor-pointer p-1 rounded ${isSelected ? 'bg-indigo-600 text-white' : 'hover:bg-slate-700 text-slate-300'}`}
-            style={{ paddingLeft: `${level * 16}px` }}
+            className={`flex items-center cursor-pointer p-2 rounded-md ${isSelected ? 'bg-indigo-600 text-white font-semibold' : 'hover:bg-slate-700/70 text-slate-300'} transition-colors`}
+            style={{ paddingLeft: `${level * 16 + 8}px` }}
         >
-            <FileIcon className="w-4 h-4 mr-2 flex-shrink-0" />
-            <span className="truncate">{node.name}</span>
+            <FileIcon className={`w-5 h-5 mr-2 flex-shrink-0 ${isSelected ? 'text-white' : 'text-slate-400'}`} />
+            <span className="truncate text-sm">{node.name}</span>
         </div>
     );
 };
@@ -98,7 +98,7 @@ const FileTree: React.FC<FileTreeProps> = ({ files, onSelectFile, selectedFile }
     const sortedTree = Object.values(tree).sort((a: TreeNode, b: TreeNode) => (a.isFolder === b.isFolder) ? a.name.localeCompare(b.name) : (a.isFolder ? -1 : 1));
 
     if (files.length === 0) {
-        return <p className="text-slate-400 text-sm">No files yet. Chat with the AI to create some!</p>
+        return <p className="text-slate-400 text-sm p-4 text-center">No files yet. Chat with the AI to create some!</p>
     }
 
     return (
