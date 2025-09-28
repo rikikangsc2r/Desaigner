@@ -110,8 +110,8 @@ ${getStyleCDN(styleLibrary)}
     <div id="root"></div>
     
     <!-- Load React. -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
 ${styleLibrary === 'bootstrap' ? getBootstrapScript() : ''}
@@ -193,22 +193,23 @@ ${getStyleCDN(styleLibrary)}
     
 ${styleLibrary === 'bootstrap' ? getBootstrapScript() : ''}
     <!-- Main app script -->
-    <script type="text/babel" data-type="module" src="app.tsx"></script>
+    <script type="text/babel" src="app.tsx"></script>
 </body>
 </html>`
     },
     {
         path: 'app.tsx',
-        content: `import React, { useState } from 'react';
-import ReactDOM from 'react-dom/client';
+        content: `// Type definitions are not available in this simple setup,
+// but Babel will correctly transpile the TSX syntax.
+// React and ReactDOM are available as global variables.
 
-const App: React.FC = () => {
-    const [count, setCount] = useState<number>(0);
+const App = () => {
+    const [count, setCount] = React.useState(0);
 
     return (
         <div>
             <h1>Hello from React with TypeScript!</h1>
-            <p>Welcome to your new project: ${projectName}</p>
+            <p>Welcome to your new project: {projectName}</p>
             <p>You clicked {count} times</p>
             <button onClick={() => setCount(count + 1)}>
                 Click me
