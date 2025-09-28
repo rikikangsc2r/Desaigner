@@ -181,7 +181,7 @@ Berdasarkan semua informasi di atas, hasilkan array JSON dari rencana Anda.
  */
 const parseFileContentResponse = (response: string): { path: string, content: string }[] => {
     const operations: { path: string, content: string }[] = [];
-    const fileBlockRegex = /-- START OF (.*?) --\r?\n([\s\S]*?)\r?\n-- END --/g;
+    const fileBlockRegex = /-- START OF (.*?) --\r?\n([\s\S]*?)\r?\n-- END(?: OF .*)? --/g;
     
     let match;
     while ((match = fileBlockRegex.exec(response)) !== null) {
