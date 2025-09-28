@@ -62,8 +62,6 @@ const getStackDescription = (template: TemplateType, styleLibrary: StyleLibrary)
     switch (template) {
         case 'html': stack = 'Single-file HTML'; break;
         case 'vanilla': stack = 'HTML, CSS, and JavaScript'; break;
-        case 'react-jsx': stack = 'React with JSX'; break;
-        case 'react-tsx': stack = 'React with TypeScript (TSX)'; break;
     }
     if (styleLibrary === 'bootstrap') {
         stack += ' and Bootstrap';
@@ -123,6 +121,47 @@ const parseJsonResponse = <T>(response: string): T => {
     }
 }
 
+export const runTaskingAgent = async (
+    userGoal: string,
+    files: ProjectFile[],
+    template: TemplateType,
+    styleLibrary: StyleLibrary,
+): Promise<string[]> => {
+    const stackDescription = getStackDescription(template, styleLibrary);
+    const systemPrompt = `Anda adalah AI analisis (model-tasking) yang canggih. Tugas Anda adalah menganalisis permintaan pengguna dan file proyek yang ada untuk mempersiapkan pembuatan rencana (blueprint). Anda harus berpikir langkah demi langkah dan mengartikulasikan proses berpikir Anda.
+
+**PRINSIP PANDUAN UTAMA:**
+1.  **ANALISIS PERMINTAAN:** Uraikan apa yang diinginkan pengguna.
+2.  **PERIKSA FILE:** Sebutkan file mana yang relevan dengan permintaan dan mengapa.
+3.  **RENCANAKAN STRATEGI:** Jelaskan secara singkat strategi umum yang akan Anda ambil (misalnya, "Saya akan memodifikasi style.css untuk menambahkan media query" atau "Saya perlu menambahkan elemen baru ke index.html").
+4.  **KESIMPULAN:** Akhiri dengan kalimat yang jelas bahwa Anda siap untuk menyusun blueprint.
+
+**ATURAN OUTPUT PENTING:**
+1.  **HANYA TEKS:** Seluruh output Anda HARUS berupa teks biasa.
+2.  **FORMAT PIKIRAN:** Setiap langkah pemikiran Anda harus dipisahkan oleh baris baru.
+3.  **JANGAN TULIS KODE:** Jangan menghasilkan kode atau JSON apa pun. Fokus hanya pada analisis.
+
+**Contoh Respons:**
+Permintaan pengguna adalah untuk membuat situs menjadi mobile-first.
+Saya perlu memeriksa 'style.css' untuk melihat aturan CSS yang ada.
+Sepertinya saya perlu menambahkan media query untuk menangani ukuran layar yang lebih kecil.
+Baik, saya sudah memahami tugasnya. Saya akan menyusun rencana Blueprint untuk AI pembuat kode.
+`;
+    
+    const promptContext = `
+${buildFileContext(files)}
+Tujuan Pengguna: "${userGoal}"
+
+Berdasarkan semua informasi di atas, hasilkan analisis langkah demi langkah Anda.
+`;
+    
+    const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
+    
+    const response = await callAIAgent(fullPrompt);
+    // Split the response into individual thoughts/steps
+    return response.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+};
+
 
 export const generateBlueprint = async (
     userGoal: string,
@@ -131,7 +170,7 @@ export const generateBlueprint = async (
     styleLibrary: StyleLibrary,
 ): Promise<BlueprintFile[]> => {
     const stackDescription = getStackDescription(template, styleLibrary);
-    const systemPrompt = `Anda adalah AI perencana pragmatis (Blueprint Agent) yang ahli dalam pengembangan front-end. Tugas Anda adalah mengubah permintaan pengguna menjadi serangkaian operasi file yang MINIMAL dan LOGIS. Fokus utama Anda adalah memenuhi permintaan pengguna dengan perubahan sesedikit mungkin pada proyek yang ada.
+    const systemPrompt = `Anda adalah AI perencana pragmatis (model-blueprint) yang ahli dalam pengembangan front-end. Tugas Anda adalah mengubah permintaan pengguna menjadi serangkaian operasi file yang MINIMAL dan LOGIS. Fokus utama Anda adalah memenuhi permintaan pengguna dengan perubahan sesedikit mungkin pada proyek yang ada.
 
 **KONTEKS PROYEK:**
 *   **Tumpukan Teknologi:** Proyek ini dibangun menggunakan **${stackDescription}**. Pastikan semua rencana file sesuai dengan tumpukan teknologi ini.

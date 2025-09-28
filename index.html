@@ -34,6 +34,13 @@
       ::-webkit-scrollbar-thumb:hover {
         background: #64748b; /* slate-500 */
       }
+      /* For dynamic viewport height to fix mobile browser UI issues */
+      :root {
+        --app-height: 100vh;
+      }
+      .h-dynamic-screen {
+        height: var(--app-height);
+      }
     </style>
 <script type="importmap">
 {

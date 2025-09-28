@@ -12,8 +12,6 @@ interface ProjectListProps {
 const templates: { id: TemplateType; name: string; desc: string }[] = [
     { id: 'html', name: 'Single File HTML', desc: 'A single HTML file to get started quickly.' },
     { id: 'vanilla', name: 'HTML, CSS, JS', desc: 'A classic starting point for any web project.' },
-    { id: 'react-jsx', name: 'React + JSX', desc: 'A starter project using React with JSX via CDN.' },
-    { id: 'react-tsx', name: 'React + TSX', desc: 'A starter project using React with TypeScript (TSX).' }
 ];
 
 const styles: { id: StyleLibrary; name: string }[] = [

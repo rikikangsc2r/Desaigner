@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation, BlueprintFile, FileOperationType } from '../types';
 import { getProject, saveProject } from '../services/projectService';
-import { generateBlueprint, generateCodeFromBlueprint, AIConversationalError } from '../services/aiService';
+import { runTaskingAgent, generateBlueprint, generateCodeFromBlueprint, AIConversationalError } from '../services/aiService';
 import { createProjectZip } from '../utils/fileUtils';
 import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon } from './Icons';
 import { TypingIndicator } from './Loader';
@@ -102,6 +102,16 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
       projectRef.current = project;
   }, [project]);
 
+  useEffect(() => {
+    const setAppHeight = () => {
+      document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    };
+    window.addEventListener('resize', setAppHeight);
+    setAppHeight();
+
+    return () => window.removeEventListener('resize', setAppHeight);
+  }, []);
+
 
   useEffect(() => {
     getProject(projectId).then(p => {
@@ -187,11 +197,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     setIsLoading(true);
     setError(null);
     
-    // Use a local variable to hold the working state throughout the async operation.
-    // Initialize it from the ref, which holds the latest confirmed state.
     let workingProject = projectRef.current!;
 
-    // Helper to apply updates to the working state and push to React state for UI updates.
     const applyUpdate = (updater: (p: Project) => Project) => {
         workingProject = updater(workingProject);
         setProject(workingProject);
@@ -201,10 +208,22 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, userMessage] }));
 
     try {
-        // Agent 1: Generate Blueprint
+        // V2 AI Flow: Tasking -> Blueprint -> Code
+        // Agent 1: Tasking Agent (model-tasking)
+        const thoughts = await runTaskingAgent(userGoal, workingProject.files, workingProject.template, workingProject.styleLibrary);
+
+        for (const thought of thoughts) {
+            applyUpdate(p => ({
+                ...p,
+                chatHistory: [...p.chatHistory, { role: 'assistant', content: thought }]
+            }));
+            // Small delay for a more natural "thinking" experience
+            await new Promise(resolve => setTimeout(resolve, 750));
+        }
+        
+        // Agent 2: Blueprint Agent (model-blueprint)
         const blueprint = await generateBlueprint(userGoal, workingProject.files, workingProject.template, workingProject.styleLibrary);
         
-        // Group blueprint operations by file path for cleaner messaging and processing
         const groupedBlueprint = new Map<string, { operation: FileOperationType; path: string; descriptions: string[] }>();
         blueprint.forEach(b => {
             const key = b.path;
@@ -212,11 +231,10 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                 groupedBlueprint.set(key, { operation: b.operation, path: b.path, descriptions: [] });
             }
             const group = groupedBlueprint.get(key)!;
-            group.operation = b.operation; // Ensure operation type is set (should be consistent)
+            group.operation = b.operation;
             group.descriptions.push(b.description);
         });
 
-        // Create the user-facing message from the grouped blueprint
         const blueprintMessageContent = "Baik, saya mengerti. Berikut adalah rencana saya:\n\n" +
             Array.from(groupedBlueprint.values()).map(group => {
                 const fullDescription = group.descriptions.length > 1
@@ -237,14 +255,13 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
             chatHistory: [...p.chatHistory, { role: 'assistant', content: "Sekarang saya akan menulis kodenya..." }]
         }));
         
-        // Create a consolidated blueprint for the code generation agent
         const consolidatedBlueprint: BlueprintFile[] = Array.from(groupedBlueprint.values()).map(group => ({
             path: group.path,
             operation: group.operation,
             description: group.descriptions.join('. '), // Combine descriptions into a single paragraph
         }));
 
-        // Agent 2: Generate Code from Blueprint
+        // Agent 3: Coding Agent
         const operations = await generateCodeFromBlueprint(userGoal, consolidatedBlueprint, workingProject.files, workingProject.template, workingProject.styleLibrary);
         
         let currentFiles = workingProject.files;
@@ -350,7 +367,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   );
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-slate-900 overflow-hidden">
+    <div className="h-dynamic-screen w-screen flex flex-col bg-slate-900 overflow-hidden">
       <header className={`bg-slate-800 p-3 flex justify-between items-center border-b border-slate-700 flex-shrink-0 ${isEditorFullscreen ? 'hidden' : ''}`}>
         <button onClick={onBack} className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors p-2 rounded-lg hover:bg-slate-700">
           <BackIcon />
@@ -399,7 +416,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         <section className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'chat' ? 'flex' : 'hidden'} flex-col gap-4 min-h-0 lg:flex lg:col-span-1`}>
             <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
             {error && <div className="text-red-400 bg-red-900/50 p-3 rounded-md text-sm">{error}</div>}
-            <div className="flex items-start gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
+            <div className="flex gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
                 <textarea
                     value={userInput}
                     onChange={(e) => setUserInput(e.target.value)}
@@ -413,7 +430,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                     <button
                         onClick={handleSendMessage}
                         disabled={isLoading || !userInput.trim()}
-                        className="p-3 bg-indigo-600 text-white rounded-lg disabled:bg-slate-600 disabled:cursor-not-allowed hover:bg-indigo-500 transition-all"
+                        className="p-3 bg-indigo-600 text-white rounded-lg disabled:bg-slate-600 disabled:cursor-not-allowed hover:bg-indigo-500 transition-all flex-1 flex justify-center items-center"
                         aria-label="Send message"
                     >
                         <SendIcon className="w-5 h-5" />
@@ -421,7 +438,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                      <button
                         onClick={handleNewChat}
                         disabled={isLoading}
-                        className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all"
+                        className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center"
                         aria-label="Start new chat"
                         title="New Chat"
                     >

@@ -4,7 +4,7 @@ export interface ProjectFile {
   content: string;
 }
 
-export type TemplateType = 'html' | 'vanilla' | 'react-jsx' | 'react-tsx';
+export type TemplateType = 'html' | 'vanilla';
 export type StyleLibrary = 'none' | 'bootstrap' | 'tailwindcss';
 
 export interface Project {
