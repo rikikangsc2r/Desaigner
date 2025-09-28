@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Project, ProjectFile, ChatMessage, FileOperation, BlueprintFile } from '../types';
+import type { Project, ProjectFile, ChatMessage, FileOperation, BlueprintFile, FileOperationType } from '../types';
 import { getProject, saveProject } from '../services/projectService';
 import { generateBlueprint, generateCodeFromBlueprint, AIConversationalError } from '../services/aiService';
 import { createProjectZip } from '../utils/fileUtils';
@@ -203,10 +203,28 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     try {
         // Agent 1: Generate Blueprint
         const blueprint = await generateBlueprint(userGoal, workingProject.files, workingProject.template, workingProject.styleLibrary);
-
-        const blueprintMessageContent = "Baik, saya mengerti. Berikut adalah rencana saya:\n\n" +
-            blueprint.map(b => `*   **${b.operation}** \`${b.path}\` - ${b.description}`).join('\n');
         
+        // Group blueprint operations by file path for cleaner messaging and processing
+        const groupedBlueprint = new Map<string, { operation: FileOperationType; path: string; descriptions: string[] }>();
+        blueprint.forEach(b => {
+            const key = b.path;
+            if (!groupedBlueprint.has(key)) {
+                groupedBlueprint.set(key, { operation: b.operation, path: b.path, descriptions: [] });
+            }
+            const group = groupedBlueprint.get(key)!;
+            group.operation = b.operation; // Ensure operation type is set (should be consistent)
+            group.descriptions.push(b.description);
+        });
+
+        // Create the user-facing message from the grouped blueprint
+        const blueprintMessageContent = "Baik, saya mengerti. Berikut adalah rencana saya:\n\n" +
+            Array.from(groupedBlueprint.values()).map(group => {
+                const fullDescription = group.descriptions.length > 1
+                    ? group.descriptions.join('; ')
+                    : group.descriptions[0];
+                return `*   **${group.operation}** \`${group.path}\` - ${fullDescription}`;
+            }).join('\n');
+
         applyUpdate(p => ({
             ...p,
             chatHistory: [...p.chatHistory, { role: 'assistant', content: blueprintMessageContent }]
@@ -218,9 +236,16 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
             ...p,
             chatHistory: [...p.chatHistory, { role: 'assistant', content: "Sekarang saya akan menulis kodenya..." }]
         }));
+        
+        // Create a consolidated blueprint for the code generation agent
+        const consolidatedBlueprint: BlueprintFile[] = Array.from(groupedBlueprint.values()).map(group => ({
+            path: group.path,
+            operation: group.operation,
+            description: group.descriptions.join('. '), // Combine descriptions into a single paragraph
+        }));
 
         // Agent 2: Generate Code from Blueprint
-        const operations = await generateCodeFromBlueprint(userGoal, blueprint, workingProject.files, workingProject.template, workingProject.styleLibrary);
+        const operations = await generateCodeFromBlueprint(userGoal, consolidatedBlueprint, workingProject.files, workingProject.template, workingProject.styleLibrary);
         
         let currentFiles = workingProject.files;
         for (const op of operations) {
@@ -244,7 +269,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
             updatedAt: Date.now(),
         }));
 
-        const successMessage: ChatMessage = { role: 'assistant', content: `Selesai! Saya telah melakukan ${operations.length} perubahan pada file proyek.` };
+        const successMessage: ChatMessage = { role: 'assistant', content: `Selesai! Saya telah melakukan perubahan pada ${operations.length} file proyek.` };
         applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, successMessage] }));
     
     } catch (err) {
