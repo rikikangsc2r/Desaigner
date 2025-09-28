@@ -76,7 +76,8 @@ const parseOperationsResponse = (response: any): FileOperation[] => {
         }
 
         // Heuristically check if the response is structured as expected. If not, it's a refusal or conversational reply.
-        const isStructuredResponse = /operation:|path:|reasoning:/i.test(txtResponse);
+        // Expanded the check to include operation types directly.
+        const isStructuredResponse = /operation:|path:|reasoning:|CREATE|UPDATE|DELETE/i.test(txtResponse);
         if (!isStructuredResponse) {
             // This custom error will be caught in the UI to be displayed as a chat message.
             throw new AIConversationalError(txtResponse);
@@ -89,57 +90,79 @@ const parseOperationsResponse = (response: any): FileOperation[] => {
             const trimmedBlock = block.trim();
             if (!trimmedBlock) return;
 
-            const lines = trimmedBlock.split('\n');
-            const op: Partial<FileOperation> & { contentLines?: string[] } = {};
-            let isContentSection = false;
-            
-            for (const line of lines) {
-                if (isContentSection) {
-                    if (!op.contentLines) op.contentLines = [];
-                    op.contentLines.push(line);
-                    continue;
-                }
-                
-                // Regex to handle "key: value" and "content:"
-                const match = line.match(/^([a-zA-Z]+):\s?(.*)$/);
-                if (match) {
-                    const key = match[1].toLowerCase();
-                    const value = match[2];
+            try {
+                const op: Partial<FileOperation> = {};
 
-                    switch (key) {
-                        case 'operation':
-                            if (['CREATE', 'UPDATE', 'DELETE'].includes(value)) {
-                                op.operation = value as FileOperationType;
-                            } else {
-                                throw new Error(`Jenis operasi tidak valid pada blok ${index}: ${value}`);
-                            }
-                            break;
-                        case 'path':
-                            op.path = value;
-                            break;
-                        case 'reasoning':
-                            op.reasoning = value;
-                            break;
-                        case 'content':
-                            isContentSection = true;
-                            break;
-                        default:
-                          // Ignore unknown keys for forward compatibility
-                          break;
+                // Find content first and split the block. This is the most reliable delimiter.
+                let headerPart = trimmedBlock;
+                const contentIndex = trimmedBlock.toLowerCase().lastIndexOf('\ncontent:');
+                
+                if (contentIndex !== -1) {
+                    headerPart = trimmedBlock.substring(0, contentIndex).trim();
+                    op.content = trimmedBlock.substring(contentIndex + '\ncontent:'.length).trim();
+                } else {
+                    const inlineContentIndex = trimmedBlock.toLowerCase().lastIndexOf(' content:');
+                    if (inlineContentIndex > 0) { // Should not be at the very beginning
+                        headerPart = trimmedBlock.substring(0, inlineContentIndex).trim();
+                        op.content = trimmedBlock.substring(inlineContentIndex + ' content:'.length).trim();
                     }
                 }
-            }
+                
+                // Normalize header part for easier parsing (replace newlines with spaces, add leading space for regex)
+                const normalizedHeader = ` ${headerPart.replace(/[\n\r]/g, ' ').trim()}`;
+                
+                // 1. Extract Operation
+                let match = normalizedHeader.match(/\soperation:\s*(CREATE|UPDATE|DELETE)/i);
+                if (match) {
+                    op.operation = match[1].toUpperCase() as FileOperationType;
+                } else {
+                    const firstWordMatch = normalizedHeader.match(/^\s*(CREATE|UPDATE|DELETE)\b/i);
+                    if (firstWordMatch) {
+                        op.operation = firstWordMatch[1].toUpperCase() as FileOperationType;
+                    }
+                }
 
-            if (op.operation === 'CREATE' || op.operation === 'UPDATE') {
-                op.content = (op.contentLines || []).join('\n');
-            }
+                // 2. Extract Path
+                match = normalizedHeader.match(/\spath:\s*(\S+)/i);
+                if (match) {
+                    op.path = match[1];
+                }
 
-            if (!op.operation || !op.path || !op.reasoning) {
-                throw new Error(`Operasi tidak lengkap pada blok ${index}. Wajib ada 'operation', 'path', dan 'reasoning'. Blok: "${trimmedBlock}"`);
+                // 3. Extract Reasoning (make it robust against grabbing other keys)
+                match = normalizedHeader.match(/\sreasoning:\s*(.*)/i);
+                if (match) {
+                    let reasoning = match[1].trim();
+                    // The regex is greedy, so truncate the reasoning if it accidentally included other keys.
+                    const otherKeys = ['operation:', 'path:', 'content:'];
+                    let earliestIndex = reasoning.length;
+                    otherKeys.forEach(key => {
+                        const idx = reasoning.toLowerCase().indexOf(key);
+                        if (idx !== -1 && idx < earliestIndex) {
+                            earliestIndex = idx;
+                        }
+                    });
+                    op.reasoning = reasoning.substring(0, earliestIndex).trim();
+                }
+
+                // Final checks
+                if (op.operation === 'CREATE' || op.operation === 'UPDATE') {
+                    // content is optional for updates (e.g. rename), but here it must be defined.
+                    // If no content was found, default to empty string.
+                    op.content = op.content ?? '';
+                }
+
+                if (!op.operation || !op.path || !op.reasoning) {
+                    throw new Error(`Operasi tidak lengkap pada blok ${index}. Wajib ada 'operation', 'path', dan 'reasoning'. Blok: "${block}"`);
+                }
+
+                operations.push(op as FileOperation);
+
+            } catch (e) {
+                if (e instanceof AIConversationalError) throw e;
+                console.error("Gagal mengurai blok operasi AI:", e, "Blok Asli:", block);
+                // Re-throw with more context
+                throw new Error(`Gagal mengurai respons teks AI: ${(e as Error).message}`);
             }
-            
-            delete op.contentLines;
-            operations.push(op as FileOperation);
         });
 
         return operations;
