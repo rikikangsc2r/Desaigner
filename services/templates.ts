@@ -116,7 +116,7 @@ ${getStyleCDN(styleLibrary)}
     
 ${styleLibrary === 'bootstrap' ? getBootstrapScript() : ''}
     <!-- Load our React component. -->
-    <script type="text/babel" src="app.jsx"></script>
+    <script type="text/babel" data-presets="react" src="app.jsx"></script>
 </body>
 </html>`
     },
@@ -193,7 +193,7 @@ ${getStyleCDN(styleLibrary)}
     
 ${styleLibrary === 'bootstrap' ? getBootstrapScript() : ''}
     <!-- Main app script -->
-    <script type="text/babel" src="app.tsx"></script>
+    <script type="text/babel" data-presets="react,typescript" src="app.tsx"></script>
 </body>
 </html>`
     },
