@@ -1,4 +1,4 @@
-import type { ProjectFile, ChatMessage, FileOperation, BlueprintFile, TemplateType, StyleLibrary } from '../types';
+import type { ProjectFile, ChatMessage, FileOperation, TemplateType, StyleLibrary } from '../types';
 
 const API_URL = 'https://nirkyy-testing.hf.space/api/generate';
 
@@ -71,265 +71,114 @@ const getStackDescription = (template: TemplateType, styleLibrary: StyleLibrary)
     return stack;
 };
 
-
-const parseJsonResponse = <T>(response: string): T => {
-    try {
-        // Remove markdown code blocks and trim whitespace
-        let jsonString = response.replace(/```(json|text)?/g, '').trim();
-
-        // Find the start of the JSON array. Handles cases where the AI adds conversational text before the JSON.
-        const startIndex = jsonString.indexOf('[');
-        if (startIndex === -1) {
-            // If no array is found, assume the entire response is a conversational message.
-            throw new AIConversationalError(jsonString);
-        }
-
-        // We'll work with the string from the first '[' onwards.
-        let potentialJson = jsonString.substring(startIndex);
-
-        // First, try to parse by finding the closing bracket, which handles well-formed JSON with trailing text.
-        const lastBracketIndex = potentialJson.lastIndexOf(']');
-        if (lastBracketIndex > -1) {
-            const completeJson = potentialJson.substring(0, lastBracketIndex + 1);
-            try {
-                return JSON.parse(completeJson) as T;
-            } catch (e) {
-                console.warn("Parsing complete JSON failed, attempting truncation recovery.", e);
-                // If it fails, proceed to the truncation recovery logic.
-            }
-        }
-        
-        // Truncation recovery logic:
-        // Find the last '}' which likely indicates the end of the last complete object.
-        const lastBraceIndex = potentialJson.lastIndexOf('}');
-        if (lastBraceIndex > -1) {
-            // Assume the object it belongs to is complete and close the array.
-            const truncatedJson = potentialJson.substring(0, lastBraceIndex + 1) + ']';
-            return JSON.parse(truncatedJson) as T;
-        }
-
-        // If we reach here, we couldn't parse it normally and couldn't find a fallback.
-        throw new Error("Struktur JSON tidak valid: tidak ada objek atau array yang dapat diurai.");
-
-    } catch (e) {
-        if (e instanceof AIConversationalError) {
-            throw e; // Re-throw conversational errors as they are expected behavior.
-        }
-        // For actual parsing errors, provide a more user-friendly message.
-        console.error("Gagal mengurai respons JSON dari AI:", e, "Teks Asli:", response);
-        throw new AIConversationalError(`Maaf, saya mengalami masalah saat memformat respons saya. Coba sederhanakan permintaan Anda atau coba lagi.`);
-    }
-}
-
-export const runTaskingAgent = async (
-    userGoal: string,
-    files: ProjectFile[],
-    template: TemplateType,
-    styleLibrary: StyleLibrary,
-): Promise<string[]> => {
-    const stackDescription = getStackDescription(template, styleLibrary);
-    const systemPrompt = `Anda adalah AI analisis (model-tasking) yang canggih. Tugas Anda adalah menganalisis permintaan pengguna dan file proyek yang ada untuk mempersiapkan pembuatan rencana (blueprint). Anda harus berpikir langkah demi langkah dan mengartikulasikan proses berpikir Anda.
-
-**PRINSIP PANDUAN UTAMA:**
-1.  **ANALISIS PERMINTAAN:** Uraikan apa yang diinginkan pengguna.
-2.  **PERIKSA FILE:** Sebutkan file mana yang relevan dengan permintaan dan mengapa.
-3.  **RENCANAKAN STRATEGI:** Jelaskan secara singkat strategi umum yang akan Anda ambil (misalnya, "Saya akan memodifikasi style.css untuk menambahkan media query" atau "Saya perlu menambahkan elemen baru ke index.html").
-4.  **KESIMPULAN:** Akhiri dengan kalimat yang jelas bahwa Anda siap untuk menyusun blueprint.
-
-**ATURAN OUTPUT PENTING:**
-1.  **HANYA TEKS:** Seluruh output Anda HARUS berupa teks biasa.
-2.  **FORMAT PIKIRAN:** Setiap langkah pemikiran Anda harus dipisahkan oleh baris baru.
-3.  **JANGAN TULIS KODE:** Jangan menghasilkan kode atau JSON apa pun. Fokus hanya pada analisis.
-
-**Contoh Respons:**
-Permintaan pengguna adalah untuk membuat situs menjadi mobile-first.
-Saya perlu memeriksa 'style.css' untuk melihat aturan CSS yang ada.
-Sepertinya saya perlu menambahkan media query untuk menangani ukuran layar yang lebih kecil.
-Baik, saya sudah memahami tugasnya. Saya akan menyusun rencana Blueprint untuk AI pembuat kode.
-`;
-    
-    const promptContext = `
-${buildFileContext(files)}
-Tujuan Pengguna: "${userGoal}"
-
-Berdasarkan semua informasi di atas, hasilkan analisis langkah demi langkah Anda.
-`;
-    
-    const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
-    
-    const response = await callAIAgent(fullPrompt);
-    // Split the response into individual thoughts/steps
-    return response.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-};
-
-
-export const generateBlueprint = async (
-    userGoal: string,
-    files: ProjectFile[],
-    template: TemplateType,
-    styleLibrary: StyleLibrary,
-): Promise<BlueprintFile[]> => {
-    const stackDescription = getStackDescription(template, styleLibrary);
-    const systemPrompt = `Anda adalah AI perencana pragmatis (model-blueprint) yang ahli dalam pengembangan front-end. Tugas Anda adalah mengubah permintaan pengguna menjadi serangkaian operasi file yang MINIMAL dan LOGIS. Fokus utama Anda adalah memenuhi permintaan pengguna dengan perubahan sesedikit mungkin pada proyek yang ada.
-
-**KONTEKS PROYEK:**
-*   **Tumpukan Teknologi:** Proyek ini dibangun menggunakan **${stackDescription}**. Pastikan semua rencana file sesuai dengan tumpukan teknologi ini.
-
-**PRINSIP PANDUAN UTAMA:**
-1.  **PERUBAHAN MINIMAL (SANGAT PENTING):** Prioritaskan untuk memodifikasi file yang sudah ada daripada membuat file baru. JANGAN memecah file (misalnya, HTML) menjadi beberapa komponen kecuali jika itu mutlak diperlukan untuk permintaan atau jika proyek sudah menggunakan struktur komponen.
-2.  **HORMATI STRUKTUR YANG ADA:** Pertahankan struktur file dan direktori yang ada. Hanya buat direktori baru jika benar-benar diperlukan.
-3.  **PRAGMATISME DI ATAS SEGALANYA:** Berikan solusi yang paling sederhana dan paling langsung untuk tujuan pengguna. Hindari rekayasa berlebihan (over-engineering). Jika pengguna meminta perubahan kecil, buatlah perubahan kecil.
-4.  **Kualitas & UI/UX:** Sambil tetap sederhana, pastikan kode yang direncanakan bersih, fungsional, dan memberikan UI/UX yang baik.
-
-**ATURAN OUTPUT PENTING:**
-1.  **HANYA JSON:** Seluruh output Anda HARUS berupa array JSON yang valid. Jangan tambahkan teks atau penjelasan lain di luar JSON.
-2.  **FORMAT OBJEK:** Setiap objek dalam array harus memiliki properti berikut:
-    *   \`path\` (string): Path lengkap ke file.
-    *   \`operation\` (string): HARUS salah satu dari 'CREATE', 'UPDATE', atau 'DELETE'.
-    *   \`description\` (string): Penjelasan SINGKAT dan JELAS tentang perubahan yang akan dilakukan.
-
-**Contoh Skenario:**
-*   **Permintaan:** "Tambahkan tombol di bawah judul di index.html"
-*   **Respons yang Diharapkan (Salah):** [{"path": "src/components/Button.js", "operation": "CREATE", ...}, {"path": "index.html", "operation": "UPDATE", ...}]
-*   **Respons yang Diharapkan (Benar):** [{"path": "index.html", "operation": "UPDATE", "description": "Menambahkan elemen tombol baru langsung di dalam body HTML."}]
-
-**Contoh Respons JSON:**
-[
-  {
-    "path": "index.html",
-    "operation": "UPDATE",
-    "description": "Memperbarui elemen body untuk menambahkan fungsionalitas atau konten baru sesuai permintaan."
-  }
-]`;
-
-    const promptContext = `
-${buildFileContext(files)}
-Tujuan Pengguna: "${userGoal}"
-
-Berdasarkan semua informasi di atas, hasilkan array JSON dari rencana Anda.
-`;
-    
-    const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
-    
-    const response = await callAIAgent(fullPrompt);
-    return parseJsonResponse<BlueprintFile[]>(response);
-};
-
 /**
- * Parses the AI's text response containing file blocks into a structured array.
+ * Parses the AI's unified response into an explanation and file contents.
  */
-const parseFileContentResponse = (response: string): { path: string, content: string }[] => {
-    const operations: { path: string, content: string }[] = [];
-    const fileBlockRegex = /-- START OF (.*?) --\r?\n([\s\S]*?)\r?\n-- END(?: OF .*)? --/g;
+const parseUnifiedResponse = (response: string): { explanation: string, generatedFiles: { path: string, content: string }[] } => {
+    const explanationRegex = /-- penjelasan --\r?\n([\s\S]*?)\r?\n--#/;
+    const fileBlockRegex = /-- (.*?) --\r?\n([\s\S]*?)\r?\n--#/g;
+    
+    const explanationMatch = response.match(explanationRegex);
+    // Fallback explanation if the block is missing but files are present
+    const explanation = explanationMatch ? explanationMatch[1].trim() : "Selesai! Saya telah memperbarui file proyek.";
+
+    const generatedFiles: { path: string, content: string }[] = [];
+    
+    let fileSection = response;
+    
+    // If an explanation block exists, start parsing for files *after* it to avoid confusion.
+    if (explanationMatch) {
+      const endOfExplanationIndex = response.indexOf('--#', explanationMatch.index);
+      if (endOfExplanationIndex !== -1) {
+        fileSection = response.substring(endOfExplanationIndex + 3);
+      }
+    }
     
     let match;
-    while ((match = fileBlockRegex.exec(response)) !== null) {
+    while ((match = fileBlockRegex.exec(fileSection)) !== null) {
         const path = match[1].trim();
         const content = match[2].trim(); 
-        if (path) { // Allow empty content
-            operations.push({ path, content });
+        if (path) {
+            generatedFiles.push({ path, content });
         }
     }
 
-    if (operations.length === 0 && response.trim() !== "") {
-      // Throw an error if the AI responded but not in the expected format.
-      throw new AIConversationalError(`The AI's response could not be parsed. Please check the format. Raw response: \n\n${response}`);
+    // If no explanation was found AND no files were parsed, it's likely a conversational response.
+    if (!explanationMatch && generatedFiles.length === 0 && response.trim() !== "") {
+      throw new AIConversationalError(`Maaf, saya tidak dapat memproses permintaan itu dalam format yang benar. Respons saya:\n\n${response}`);
     }
-
-    return operations;
+    
+    return { explanation, generatedFiles };
 };
 
-export const generateCodeFromBlueprint = async (
+
+export const runAIAgentWorkflow = async (
     userGoal: string,
-    blueprint: BlueprintFile[],
     files: ProjectFile[],
     template: TemplateType,
     styleLibrary: StyleLibrary,
-): Promise<FileOperation[]> => {
-    
-    // Separate blueprint operations: coding agent handles CREATE/UPDATE, DELETEs are handled directly.
-    const opsToCode = blueprint.filter(b => b.operation === 'CREATE' || b.operation === 'UPDATE');
-    const deleteOps: FileOperation[] = blueprint
-        .filter(b => b.operation === 'DELETE')
-        .map(b => ({
-            operation: 'DELETE',
-            path: b.path,
-            reasoning: b.description // Use blueprint description as reasoning
-        }));
-
-    // If there are no files to create or update, return only the delete operations.
-    if (opsToCode.length === 0) {
-        return deleteOps;
-    }
+): Promise<{ explanation: string; operations: FileOperation[] }> => {
     
     const stackDescription = getStackDescription(template, styleLibrary);
-    const systemPrompt = `Anda adalah AI pembuat kode ahli (Coding Agent) yang berfokus pada kualitas produksi. Berdasarkan permintaan pengguna dan RENCANA yang diberikan, tulis KONTEN LENGKAP untuk semua file yang perlu dibuat atau diubah.
+    const systemPrompt = `Anda adalah AI pengembang front-end otonom yang ahli. Tugas Anda adalah menganalisis permintaan pengguna, merencanakan perubahan yang diperlukan, dan menulis kode berkualitas produksi dalam satu langkah.
 
-**KONTEKS PROYEK PENTING:**
-*   **Tumpukan Teknologi:** Proyek ini dibangun menggunakan **${stackDescription}**. Semua kode yang Anda tulis HARUS sesuai dengan tumpukan teknologi ini. Misalnya, jika menggunakan TailwindCSS, gunakan kelas utilitasnya. Jika menggunakan React, tulis komponen fungsional dengan Hooks.
+**KONTEKS PROYEK:**
+*   **Tumpukan Teknologi:** Proyek ini dibangun menggunakan **${stackDescription}**. Semua kode yang Anda tulis HARUS sesuai dengan tumpukan ini.
 
-**ATURAN OUTPUT PENTING:**
-1.  **HANYA TULIS KODE:** Jangan tambahkan penjelasan atau teks percakapan apa pun.
-2.  **FORMAT WAJIB:** Anda HARUS menyajikan setiap file dalam format berikut. Pastikan untuk menyertakan penanda awal dan akhir:
-    
-    -- START OF [path/lengkap/ke/file.ekstensi] --
-    [Konten file lengkap di sini...]
-    -- END --
+**PROSES WAJIB:**
+1.  **Analisis & Rencana:** Pikirkan secara internal tentang permintaan pengguna dan file yang ada. Tentukan cara terbaik dan paling sederhana untuk mencapai tujuan.
+2.  **Tulis Penjelasan:** Ringkas rencana Anda menjadi penjelasan singkat untuk pengguna.
+3.  **Tulis Kode:** Hasilkan konten LENGKAP untuk semua file yang perlu dibuat atau diubah. Jika suatu file tidak memerlukan perubahan, JANGAN sertakan dalam output.
 
-3.  **GENERASI LENGKAP (KRUSIAL):** Anda HARUS menghasilkan blok kode untuk SETIAP file yang tercantum dalam rencana. JANGAN melewatkan file apa pun. Jika rencananya memiliki 3 file, output Anda HARUS berisi 3 blok \`START OF...END\`.
+**ATURAN OUTPUT YANG SANGAT KETAT:**
+Anda HARUS mengikuti format ini dengan tepat. Jangan tambahkan teks atau percakapan lain.
 
-**PRINSIP KODE UTAMA:**
-1.  **Kualitas Produksi:** Tulis kode yang bersih, efisien, dan mudah dibaca.
-2.  **UI/UX Modern:** Jika menulis kode UI (HTML/CSS/JS), pastikan hasilnya responsif, dapat diakses, dan secara visual menarik.
-3.  **Lengkap & Fungsional:** Kode yang Anda tulis harus lengkap dan siap pakai. Jangan gunakan placeholder.
+-- penjelasan --
+Di sini Anda akan menulis ringkasan singkat tentang perubahan yang akan Anda lakukan. Misalnya: "Baik, saya akan memperbarui file index.html untuk menambahkan tombol baru dan menatanya di style.css."
+--#
 
-**Contoh Respons:**
--- START OF index.html --
+-- path/to/file1.html --
 <!DOCTYPE html>
-<html lang="en">
-<body>
-    <h1>Hello World</h1>
-</body>
-</html>
--- END --
--- START OF style.css --
-body { font-family: sans-serif; }
--- END --
-`;
+... konten lengkap file 1 ...
+--#
+
+-- path/to/file2.css --
+... konten lengkap file 2 ...
+--#
+
+**PRINSIP UTAMA:**
+1.  **PERUBAHAN MINIMAL:** Selalu prioritaskan untuk memodifikasi file yang ada. Jangan membuat file baru atau memecah file yang ada kecuali benar-benar diperlukan.
+2.  **KODE LENGKAP:** Anda HARUS menulis konten file secara LENGKAP dari awal hingga akhir. Jangan gunakan placeholder atau komentar seperti "// tambahkan kode di sini".
+3.  **KUALITAS PRODUKSI:** Tulis kode yang bersih, efisien, responsif, dan mudah dibaca.
+4.  **HANYA FILE YANG DIUBAH:** Hanya sertakan blok file untuk file yang Anda buat atau ubah.`;
 
     const promptContext = `
 ${buildFileContext(files)}
 Tujuan Pengguna: "${userGoal}"
 
-Rencana (Blueprint) untuk diikuti (hanya buat/perbarui file-file ini):
-${JSON.stringify(opsToCode, null, 2)}
-
-Sekarang, hasilkan konten lengkap untuk file-file dalam format yang ditentukan. Patuhi tumpukan teknologi proyek!
+Berdasarkan semua informasi di atas, hasilkan respons Anda dalam format yang ditentukan.
 `;
 
     const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
+    
+    const responseText = await callAIAgent(fullPrompt);
+    
+    const { explanation, generatedFiles } = parseUnifiedResponse(responseText);
 
-    const response = await callAIAgent(fullPrompt);
-    
-    const parsedFileContents = parseFileContentResponse(response);
-    const parsedFileMap = new Map(parsedFileContents.map(p => [p.path, p.content]));
-    
-    const codeOps: FileOperation[] = [];
+    const operations: FileOperation[] = [];
+    const existingFilePaths = new Set(files.map(f => f.path));
 
-    // Only create operations for files that were both in the blueprint and generated by the AI.
-    opsToCode.forEach(blueprintFile => {
-        if (parsedFileMap.has(blueprintFile.path)) {
-            codeOps.push({
-                operation: blueprintFile.operation as 'CREATE' | 'UPDATE',
-                path: blueprintFile.path,
-                content: parsedFileMap.get(blueprintFile.path),
-                reasoning: blueprintFile.description
-            });
-        } else {
-            console.warn(`AI did not generate content for the planned file: ${blueprintFile.path}. Skipping operation.`);
-        }
-    });
-    
-    // Combine the generated code operations with the deletion operations.
-    return [...codeOps, ...deleteOps];
-}
+    for (const file of generatedFiles) {
+        operations.push({
+            operation: existingFilePaths.has(file.path) ? 'UPDATE' : 'CREATE',
+            path: file.path,
+            content: file.content,
+            reasoning: explanation,
+        });
+    }
+
+    // This simplified model doesn't handle deletions. This is a limitation.
+    // A future improvement could be to have the AI output a 'DELETE' operation in a special block.
+
+    return { explanation, operations };
+};

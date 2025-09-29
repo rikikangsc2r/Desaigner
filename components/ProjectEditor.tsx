@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation, BlueprintFile, FileOperationType } from '../types';
 import { getProject, saveProject } from '../services/projectService';
-import { runTaskingAgent, generateBlueprint, generateCodeFromBlueprint, AIConversationalError } from '../services/aiService';
+import { runAIAgentWorkflow, AIConversationalError } from '../services/aiService';
 import { createProjectZip, createPreviewHtml } from '../utils/fileUtils';
 import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, MenuIcon, XIcon, CloudUploadIcon, SpinnerIcon } from './Icons';
 import { TypingIndicator } from './Loader';
@@ -17,6 +17,16 @@ interface ProjectEditorProps {
 }
 
 type MobileView = 'files' | 'editor' | 'chat';
+
+/**
+ * Sends a signal to the preview window via localStorage to trigger a refresh.
+ * @param projectId The ID of the project to signal an update for.
+ */
+const signalPreviewUpdate = (projectId: string) => {
+  if (!projectId) return;
+  localStorage.setItem(`preview-update-signal-${projectId}`, Date.now().toString());
+};
+
 
 const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): ProjectFile[] => {
   let updatedFiles = [...currentFiles];
@@ -170,7 +180,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     setIsEditorDirty(true);
   };
   
-  const handleSaveFile = useCallback(async () => {
+  const handleSaveFile = useCallback(async (options: { signal?: boolean } = {}) => {
+    const { signal = true } = options;
     if (!project || !selectedFilePath || !isEditorDirty) return;
     
     const updatedFiles = project.files.map(f =>
@@ -187,6 +198,9 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     await saveProject(updatedProject);
     setIsEditorDirty(false);
 
+    if (signal) {
+      signalPreviewUpdate(project.id);
+    }
   }, [project, selectedFilePath, editorContent, isEditorDirty]);
 
   const handleSendMessage = useCallback(async () => {
@@ -194,11 +208,12 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
     if (isEditorDirty) {
         if (confirm('Anda memiliki perubahan yang belum disimpan di editor. Simpan sebelum mengirim pesan?')) {
-            await handleSaveFile();
+            await handleSaveFile({ signal: false });
         }
     }
 
     const userGoal = userInput;
+    const originalTimestamp = project.updatedAt;
     setUserInput('');
     setIsLoading(true);
     setError(null);
@@ -214,86 +229,41 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, userMessage] }));
 
     try {
-        // V2 AI Flow: Tasking -> Blueprint -> Code
-        // Agent 1: Tasking Agent (model-tasking)
-        const thoughts = await runTaskingAgent(userGoal, workingProject.files, workingProject.template, workingProject.styleLibrary);
+        // New Single API Call Workflow
+        const { explanation, operations } = await runAIAgentWorkflow(userGoal, workingProject.files, workingProject.template, workingProject.styleLibrary);
 
-        for (const thought of thoughts) {
+        // 1. Show the explanation from the AI as its response.
+        const explanationMessage: ChatMessage = { role: 'assistant', content: explanation };
+        applyUpdate(p => ({
+            ...p,
+            chatHistory: [...p.chatHistory, explanationMessage]
+        }));
+        
+        // 2. Apply the file operations if any were generated
+        if (operations.length > 0) {
+            let currentFiles = workingProject.files;
+            for (const op of operations) {
+                currentFiles = applyOperation(currentFiles, op);
+                
+                // Update editor if the selected file was changed
+                if (op.path === selectedFilePath) {
+                    if(op.operation === 'DELETE') { 
+                        setSelectedFilePath(null);
+                        setEditorContent('');
+                    } else {
+                        setEditorContent(op.content ?? '');
+                    }
+                    setIsEditorDirty(false); // Changes came from AI, so editor is not "dirty" from user's perspective
+                }
+            }
+            
             applyUpdate(p => ({
                 ...p,
-                chatHistory: [...p.chatHistory, { role: 'assistant', content: thought }]
+                files: currentFiles,
+                updatedAt: Date.now(),
             }));
-            // Small delay for a more natural "thinking" experience
-            await new Promise(resolve => setTimeout(resolve, 750));
         }
-        
-        // Agent 2: Blueprint Agent (model-blueprint)
-        const blueprint = await generateBlueprint(userGoal, workingProject.files, workingProject.template, workingProject.styleLibrary);
-        
-        const groupedBlueprint = new Map<string, { operation: FileOperationType; path: string; descriptions: string[] }>();
-        blueprint.forEach(b => {
-            const key = b.path;
-            if (!groupedBlueprint.has(key)) {
-                groupedBlueprint.set(key, { operation: b.operation, path: b.path, descriptions: [] });
-            }
-            const group = groupedBlueprint.get(key)!;
-            group.operation = b.operation;
-            group.descriptions.push(b.description);
-        });
-
-        const blueprintMessageContent = "Baik, saya mengerti. Berikut adalah rencana saya:\n\n" +
-            Array.from(groupedBlueprint.values()).map(group => {
-                const fullDescription = group.descriptions.length > 1
-                    ? group.descriptions.join('; ')
-                    : group.descriptions[0];
-                return `*   **${group.operation}** \`${group.path}\` - ${fullDescription}`;
-            }).join('\n');
-
-        applyUpdate(p => ({
-            ...p,
-            chatHistory: [...p.chatHistory, { role: 'assistant', content: blueprintMessageContent }]
-        }));
-
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Small delay for UX
-
-        applyUpdate(p => ({
-            ...p,
-            chatHistory: [...p.chatHistory, { role: 'assistant', content: "Sekarang saya akan menulis kodenya..." }]
-        }));
-        
-        const consolidatedBlueprint: BlueprintFile[] = Array.from(groupedBlueprint.values()).map(group => ({
-            path: group.path,
-            operation: group.operation,
-            description: group.descriptions.join('. '), // Combine descriptions into a single paragraph
-        }));
-
-        // Agent 3: Coding Agent
-        const operations = await generateCodeFromBlueprint(userGoal, consolidatedBlueprint, workingProject.files, workingProject.template, workingProject.styleLibrary);
-        
-        let currentFiles = workingProject.files;
-        for (const op of operations) {
-            currentFiles = applyOperation(currentFiles, op);
-            
-            // Update editor if the selected file was changed
-            if (op.path === selectedFilePath) {
-                if(op.operation === 'DELETE') {
-                    setSelectedFilePath(null);
-                    setEditorContent('');
-                } else {
-                    setEditorContent(op.content ?? '');
-                }
-                setIsEditorDirty(false);
-            }
-        }
-        
-        applyUpdate(p => ({
-            ...p,
-            files: currentFiles,
-            updatedAt: Date.now(),
-        }));
-
-        const successMessage: ChatMessage = { role: 'assistant', content: `Selesai! Saya telah melakukan perubahan pada ${operations.length} file proyek.` };
-        applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, successMessage] }));
+        // No extra success message needed as the explanation covers it.
     
     } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
@@ -306,6 +276,10 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         projectRef.current = workingProject;
         if (projectRef.current) {
             await saveProject(projectRef.current);
+            // If the project was updated, signal the preview to refresh
+            if (projectRef.current.updatedAt > originalTimestamp) {
+                signalPreviewUpdate(projectRef.current.id);
+            }
         }
     }
   }, [project, userInput, isEditorDirty, selectedFilePath, handleSaveFile]);
