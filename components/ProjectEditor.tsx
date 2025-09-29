@@ -311,14 +311,21 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     setIsPublishing(true);
     setError(null);
     try {
-        const htmlContent = createPreviewHtml(project.files);
+        const previewHtml = createPreviewHtml(project.files);
+        const payload = {
+            files: project.files,
+            previewHtml: previewHtml,
+            template: project.template,
+            styleLibrary: project.styleLibrary,
+            name: project.name,
+        };
         const response = await fetch('https://jsonblob.com/api/jsonBlob', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
             },
-            body: JSON.stringify({ html: htmlContent })
+            body: JSON.stringify(payload)
         });
         if (!response.ok) {
             const errorBody = await response.text();

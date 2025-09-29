@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Project } from '../types';
+import type { Project, ProjectFile, StyleLibrary, TemplateType } from '../types';
 import { saveProject } from '../services/projectService';
 import ForkProjectModal from './ForkProjectModal';
 import { GitBranchIcon } from './Icons';
@@ -8,8 +8,16 @@ interface JsonBlobViewerProps {
     blobId: string;
 }
 
+interface ForkableProjectData {
+    files: ProjectFile[];
+    template: TemplateType;
+    styleLibrary: StyleLibrary;
+    name: string;
+}
+
 const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
     const [htmlContent, setHtmlContent] = useState<string | null>(null);
+    const [forkableProjectData, setForkableProjectData] = useState<ForkableProjectData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isForkModalOpen, setIsForkModalOpen] = useState(false);
@@ -23,8 +31,25 @@ const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
                 return res.json();
             })
             .then(data => {
-                if (data && data.html && typeof data.html === 'string') {
+                // New format check (with full project structure)
+                if (data && data.previewHtml && Array.isArray(data.files)) {
+                    setHtmlContent(data.previewHtml);
+                    setForkableProjectData({
+                        files: data.files,
+                        template: data.template || 'vanilla',
+                        styleLibrary: data.styleLibrary || 'none',
+                        name: data.name || `Fork of ${blobId.substring(0,8)}`
+                    });
+                } 
+                // Old format check for backward compatibility
+                else if (data && data.html && typeof data.html === 'string') {
                     setHtmlContent(data.html);
+                    setForkableProjectData({
+                        files: [{ path: 'index.html', content: data.html }],
+                        template: 'html',
+                        styleLibrary: 'none',
+                        name: `Fork of ${blobId.substring(0,8)}`
+                    });
                 } else {
                     setError('Invalid content format found at the URL.');
                 }
@@ -39,7 +64,7 @@ const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
     }, [blobId]);
 
     const handleForkProject = useCallback(async (projectName: string) => {
-        if (!htmlContent) {
+        if (!forkableProjectData) {
             alert('Cannot fork project: content is not available.');
             return;
         }
@@ -47,12 +72,12 @@ const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
         const newProject: Project = {
             id: `proj_${Date.now()}`,
             name: projectName,
-            files: [{ path: 'index.html', content: htmlContent }],
+            files: forkableProjectData.files,
             chatHistory: [],
             updatedAt: Date.now(),
             currentSessionId: Math.random().toString(36).substring(2, 9),
-            template: 'html',
-            styleLibrary: 'none',
+            template: forkableProjectData.template,
+            styleLibrary: forkableProjectData.styleLibrary,
         };
 
         try {
@@ -66,7 +91,7 @@ const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
             alert(`Failed to fork project: ${errorMessage}`);
         }
 
-    }, [htmlContent]);
+    }, [forkableProjectData]);
     
     if (isLoading) {
         return (
@@ -108,7 +133,7 @@ const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
                 isOpen={isForkModalOpen}
                 onClose={() => setIsForkModalOpen(false)}
                 onFork={handleForkProject}
-                defaultName={`Fork of ${blobId.substring(0,8)}`}
+                defaultName={forkableProjectData?.name || `Fork of ${blobId.substring(0,8)}`}
             />
         </div>
     );
