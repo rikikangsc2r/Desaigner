@@ -111,6 +111,15 @@ export const CloudUploadIcon: React.FC<{className?: string}> = ({className}) => 
     </svg>
 );
 
+export const GitBranchIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg {...iconProps} className={className || iconProps.className}>
+        <line x1="6" y1="3" x2="6" y2="15"></line>
+        <circle cx="18" cy="6" r="3"></circle>
+        <circle cx="6" cy="18" r="3"></circle>
+        <path d="M18 9a9 9 0 0 1-9 9"></path>
+    </svg>
+);
+
 export const SpinnerIcon: React.FC<{className?: string}> = ({className}) => (
     <svg className={`animate-spin ${className || "w-5 h-5"}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
