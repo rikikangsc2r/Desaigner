@@ -54,7 +54,7 @@ const callAIAgent = async (conversationHistory: ChatMessage[], tools: any[]): Pr
     });
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5',
       messages: conversationHistory as any,
       tools: tools,
       tool_choice: 'auto',
