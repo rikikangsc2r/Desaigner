@@ -21,6 +21,7 @@ export interface Project {
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  operations?: FileOperation[];
 }
 
 export type FileOperationType = 'CREATE' | 'UPDATE' | 'DELETE';

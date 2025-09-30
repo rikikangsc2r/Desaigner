@@ -1,6 +1,34 @@
+
+
 import type { ProjectFile, ChatMessage, FileOperation, TemplateType, StyleLibrary } from '../types';
 
-const API_URL = 'https://nirkyy-testing.hf.space/api/generate';
+let openAIKey: string | null = null;
+
+/**
+ * Fetches and caches the OpenAI API key from the proxy service.
+ */
+const getOpenAIKey = async (): Promise<string> => {
+    if (openAIKey) {
+        return openAIKey;
+    }
+    try {
+        const response = await fetch('https://purxy.vercel.app/api/openaikey');
+        if (!response.ok) {
+            throw new Error(`Failed to fetch API key with status: ${response.status}`);
+        }
+        const data = await response.json();
+        if (data && data.success && data.extractedContent) {
+            openAIKey = data.extractedContent;
+            return openAIKey;
+        } else {
+            throw new Error('Invalid response from API key provider.');
+        }
+    } catch (error) {
+        console.error('Error fetching OpenAI key:', error);
+        throw new Error('Could not retrieve the necessary API key to contact the AI.');
+    }
+};
+
 
 /**
  * Custom error for when the AI returns a conversational response instead of the expected format.
@@ -13,48 +41,54 @@ export class AIConversationalError extends Error {
 }
 
 /**
- * A generic function to call the AI API.
+ * A generic function to call the new AI API.
  */
-const callAIAgent = async (prompt: string): Promise<string> => {
+const callAIAgent = async (conversationHistory: ChatMessage[], tools: any[]): Promise<any> => {
   try {
+    const apiKey = await getOpenAIKey();
+    const API_URL = 'https://api.openai.com/v1/responses';
+
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        prompt: prompt,
+        model: 'gpt-5',
+        input: conversationHistory,
+        tools: tools,
+        tool_choice: 'auto',
+        stream: false,
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Permintaan API gagal: ${response.status} ${errorText}`);
+      // Try to parse the error for a more specific message
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error && errorJson.error.message) {
+            throw new Error(`API request failed: ${response.status} ${JSON.stringify(errorJson.error)}`);
+        }
+      } catch (e) {
+        // Fallback to raw text if not valid JSON
+        throw new Error(`API request failed: ${response.status} ${errorText}`);
+      }
     }
 
-    const answer = await response.text();
+    const jsonResponse = await response.json();
 
-    if (!answer) {
-        throw new Error('Respons API kosong');
+    if (!jsonResponse) {
+        throw new Error('API response was empty.');
     }
     
-    return answer.trim();
+    return jsonResponse;
 
   } catch (error) {
-    console.error(`Kesalahan saat memanggil AI:`, error);
+    console.error(`Error calling AI:`, error);
     throw error;
   }
-};
-
-const buildFileContext = (files: ProjectFile[]): string => {
-  if (files.length === 0) {
-    return "Proyek ini saat ini kosong. Tidak ada file yang ada.\n";
-  }
-  let context = "Ini adalah file-file yang ada dalam proyek saat ini:\n\n";
-  files.forEach(file => {
-    context += `--- File: ${file.path} ---\n${file.content}\n\n`;
-  });
-  return context;
 };
 
 // FIX: Refactored function to remove deprecated 'html' and 'vanilla' template types.
@@ -69,114 +103,196 @@ const getStackDescription = (template: TemplateType, styleLibrary: StyleLibrary)
     return stack;
 };
 
-/**
- * Parses the AI's unified response into an explanation and file contents.
- */
-const parseUnifiedResponse = (response: string): { explanation: string, generatedFiles: { path: string, content: string }[] } => {
-    const explanationRegex = /-- penjelasan --\r?\n([\s\S]*?)\r?\n--#/;
-    const fileBlockRegex = /-- (.*?) --\r?\n([\s\S]*?)\r?\n--#/g;
-    
-    const explanationMatch = response.match(explanationRegex);
-    // Fallback explanation if the block is missing but files are present
-    const explanation = explanationMatch ? explanationMatch[1].trim() : "Selesai! Saya telah memperbarui file proyek.";
-
-    const generatedFiles: { path: string, content: string }[] = [];
-    
-    let fileSection = response;
-    
-    // If an explanation block exists, start parsing for files *after* it to avoid confusion.
-    if (explanationMatch) {
-      const endOfExplanationIndex = response.indexOf('--#', explanationMatch.index);
-      if (endOfExplanationIndex !== -1) {
-        fileSection = response.substring(endOfExplanationIndex + 3);
-      }
-    }
-    
-    let match;
-    while ((match = fileBlockRegex.exec(fileSection)) !== null) {
-        const path = match[1].trim();
-        const content = match[2].trim(); 
-        if (path) {
-            generatedFiles.push({ path, content });
-        }
-    }
-
-    // If no explanation was found AND no files were parsed, it's likely a conversational response.
-    if (!explanationMatch && generatedFiles.length === 0 && response.trim() !== "") {
-      throw new AIConversationalError(`Maaf, saya tidak dapat memproses permintaan itu dalam format yang benar. Respons saya:\n\n${response}`);
-    }
-    
-    return { explanation, generatedFiles };
-};
-
 
 export const runAIAgentWorkflow = async (
     userGoal: string,
     files: ProjectFile[],
     template: TemplateType,
     styleLibrary: StyleLibrary,
+    onThought: (thought: string) => void, // Callback for UI updates
 ): Promise<{ explanation: string; operations: FileOperation[] }> => {
     
+    const fileMap = new Map(files.map(f => [f.path, f.content]));
+
+    const tools = [
+        {
+          type: "function",
+          name: "think",
+          description: "Records your internal monologue or plan for the user to see. Use this to outline your steps before reading files or applying changes. This helps the user understand your process.",
+          parameters: {
+            type: "object",
+            properties: {
+              thought: {
+                type: "string",
+                description: "Your thought process or what you plan to do next, in Indonesian. E.g., 'Baik, saya perlu melihat file index.html untuk memahami strukturnya.'"
+              }
+            },
+            required: ["thought"]
+          }
+        },
+        {
+          type: "function",
+          name: "read_file",
+          description: "Reads the full content of one or more files from the project to understand their contents. Provide a list of all paths you need to inspect.",
+          parameters: {
+            type: "object",
+            properties: {
+              paths: {
+                type: "array",
+                description: "An array of full file paths to read.",
+                items: {
+                    type: "string"
+                }
+              }
+            },
+            required: ["paths"]
+          }
+        },
+        {
+          type: "function",
+          name: "apply_project_changes",
+          description: "FINISHES the task. This is the final step. Call this function only when you have all the information and are ready to provide the complete code changes. It applies a set of file operations (CREATE, UPDATE, DELETE) to the project.",
+          parameters: {
+            type: "object",
+            properties: {
+              explanation: {
+                type: "string",
+                description: "A brief, user-facing explanation of the changes being made. E.g., 'Okay, I'll update the index.html file to add a new button and style it in style.css.'"
+              },
+              operations: {
+                type: "array",
+                description: "A list of file operations to perform. For updates, provide the COMPLETE new file content.",
+                items: {
+                  type: "object",
+                  properties: {
+                    operation: { type: "string", description: "The type of operation.", enum: ["CREATE", "UPDATE", "DELETE"] },
+                    path: { type: "string", description: "The full path of the file to operate on." },
+                    content: { type: "string", description: "The full new content of the file. Required for CREATE and UPDATE. For DELETE, provide an empty string." }
+                  },
+                  required: ["operation", "path", "content"],
+                  additionalProperties: false
+                }
+              }
+            },
+            required: ["explanation", "operations"],
+            additionalProperties: false
+          },
+          strict: true
+        }
+    ];
+    
     const stackDescription = getStackDescription(template, styleLibrary);
-    const systemPrompt = `Anda adalah AI pengembang front-end otonom yang ahli. Tugas Anda adalah menganalisis permintaan pengguna, merencanakan perubahan yang diperlukan, dan menulis kode berkualitas produksi dalam satu langkah.
-
-**KONTEKS PROYEK:**
-*   **Tumpukan Teknologi:** Proyek ini dibangun menggunakan **${stackDescription}**. Semua kode yang Anda tulis HARUS sesuai dengan tumpukan ini.
-
-**PROSES WAJIB:**
-1.  **Analisis & Rencana:** Pikirkan secara internal tentang permintaan pengguna dan file yang ada. Tentukan cara terbaik dan paling sederhana untuk mencapai tujuan.
-2.  **Tulis Penjelasan:** Ringkas rencana Anda menjadi penjelasan singkat untuk pengguna.
-3.  **Tulis Kode:** Hasilkan konten LENGKAP untuk semua file yang perlu dibuat atau diubah. Jika suatu file tidak memerlukan perubahan, JANGAN sertakan dalam output.
-
-**ATURAN OUTPUT YANG SANGAT KETAT:**
-Anda HARUS mengikuti format ini dengan tepat. Jangan tambahkan teks atau percakapan lain.
-
--- penjelasan --
-Di sini Anda akan menulis ringkasan singkat tentang perubahan yang akan Anda lakukan. Misalnya: "Baik, saya akan memperbarui file index.html untuk menambahkan tombol baru dan menatanya di style.css."
---#
-
--- path/to/file1.html --
-<!DOCTYPE html>
-... konten lengkap file 1 ...
---#
-
--- path/to/file2.css --
-... konten lengkap file 2 ...
---#
-
-**PRINSIP UTAMA:**
-1.  **PERUBAHAN MINIMAL:** Selalu prioritaskan untuk memodifikasi file yang ada. Jangan membuat file baru atau memecah file yang ada kecuali benar-benar diperlukan.
-2.  **KODE LENGKAP:** Anda HARUS menulis konten file secara LENGKAP dari awal hingga akhir. Jangan gunakan placeholder atau komentar seperti "// tambahkan kode di sini".
-3.  **KUALITAS PRODUKSI:** Tulis kode yang bersih, efisien, responsif, dan mudah dibaca.
-4.  **HANYA FILE YANG DIUBAH:** Hanya sertakan blok file untuk file yang Anda buat atau ubah.`;
-
-    const promptContext = `
-${buildFileContext(files)}
-Tujuan Pengguna: "${userGoal}"
-
-Berdasarkan semua informasi di atas, hasilkan respons Anda dalam format yang ditentukan.
-`;
-
-    const fullPrompt = `${systemPrompt}\n\n${promptContext}`;
+    const fileList = files.length > 0 ? files.map(f => `\`${f.path}\``).join('\n') : 'No files exist yet.';
     
-    const responseText = await callAIAgent(fullPrompt);
-    
-    const { explanation, generatedFiles } = parseUnifiedResponse(responseText);
+    const systemPrompt = `You are an expert autonomous front-end developer AI. Your task is to achieve the user's goal by thinking, reading files, and then finally calling 'apply_project_changes' with the necessary code changes. The user is Indonesian, so your 'think' steps MUST be in Indonesian.
 
-    const operations: FileOperation[] = [];
-    const existingFilePaths = new Set(files.map(f => f.path));
+**PROJECT CONTEXT:**
+*   **Tech Stack:** The project is built using **${stackDescription}**.
+*   **Available Files:**\n${fileList}
 
-    for (const file of generatedFiles) {
-        operations.push({
-            operation: existingFilePaths.has(file.path) ? 'UPDATE' : 'CREATE',
-            path: file.path,
-            content: file.content,
-            reasoning: explanation,
-        });
+**YOUR WORKFLOW (LOOP):**
+1.  **Think:** Use the 'think' tool to outline your plan in Indonesian. E.g., "Baik, saya akan membaca file index.html dan style.css."
+2.  **Read:** Use the 'read_file' tool with a list of file paths to inspect multiple files at once. You do NOT have the file contents initially.
+3.  **Analyze:** After you read a file, its content will be provided to you in a system message. You MUST analyze this content in your next step to decide what to do. DO NOT read the same file again unless absolutely necessary.
+4.  **Repeat:** Continue thinking and reading until you have all necessary information.
+5.  **Apply Changes:** Once you are ready to write the code, call 'apply_project_changes'. This is your FINAL action and will stop the loop.
+
+**CORE PRINCIPLES:**
+*   **COMPLETE CODE:** When updating a file, you MUST provide the ENTIRE file content from start to finish.
+*   **PRODUCTION QUALITY:** Write clean, efficient, and responsive code.`;
+
+    const conversationHistory: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Tujuan Pengguna: "${userGoal}"` }
+    ];
+
+    let loopCount = 0;
+    while (true) {
+        loopCount++;
+        if (loopCount > 20) { // Safety break to prevent accidental infinite loops
+            throw new Error("AI agent exceeded maximum steps without finishing. Please try rephrasing your request.");
+        }
+
+        const responseJson = await callAIAgent(conversationHistory, tools);
+        
+        const assistantResponse = responseJson.output;
+        if (!assistantResponse || !Array.isArray(assistantResponse)) {
+            const conversationalText = responseJson.text?.content;
+             if (conversationalText) {
+                throw new AIConversationalError(`The AI responded conversationally: ${conversationalText}`);
+            }
+            console.error("AI response did not contain a valid output array:", responseJson);
+            throw new Error('AI returned an invalid response format.');
+        }
+
+        const functionCalls = assistantResponse.filter((o: any) => o.type === 'function_call');
+
+        if (functionCalls.length > 0) {
+            const toolCallSummary = functionCalls.map((call: any) => {
+                return `Calling tool \`${call.name}\` with arguments: ${call.arguments}`;
+            }).join('\n');
+            
+            conversationHistory.push({
+                role: 'assistant',
+                content: toolCallSummary,
+            });
+        }
+        
+        const finalCall = functionCalls.find((c: any) => c.name === 'apply_project_changes');
+        if (finalCall) {
+            try {
+                const args = JSON.parse(finalCall.arguments);
+                if (!args.explanation || !Array.isArray(args.operations)) {
+                    throw new Error('AI returned malformed arguments for file operations.');
+                }
+                return args as { explanation: string; operations: FileOperation[] };
+            } catch (e) {
+                console.error("Failed to parse apply_project_changes arguments:", finalCall.arguments, e);
+                throw new Error("AI returned invalid data structure for file changes.");
+            }
+        }
+
+        if (functionCalls.length === 0) {
+            const conversationalText = assistantResponse.find((o: any) => o.type === 'text')?.content;
+            if (conversationalText) {
+                throw new AIConversationalError(`The AI responded conversationally instead of using a tool: ${conversationalText}`);
+            }
+        }
+
+        for (const call of functionCalls) {
+            try {
+                const args = JSON.parse(call.arguments);
+                let result_content = '';
+
+                if (call.name === 'think') {
+                    if (args.thought) {
+                        onThought(args.thought);
+                        result_content = `Tool \`think\` was called. Thought was recorded: "${args.thought}"`;
+                    }
+                } else if (call.name === 'read_file') {
+                    const paths = args.paths;
+                    if (Array.isArray(paths) && paths.length > 0) {
+                        onThought(`Membaca file: \`${paths.join('`, `')}\``);
+                        const contents = paths.map(path => {
+                            if (fileMap.has(path)) {
+                                return `Content of \`${path}\`:\n---\n${fileMap.get(path)}`;
+                            } else {
+                                onThought(`Mencoba membaca file yang tidak ada: \`${path}\``);
+                                return `Error: File not found: \`${path}\``;
+                            }
+                        });
+                        result_content = `Tool \`read_file\` was called. Here are the contents:\n\n${contents.join('\n\n')}`;
+                    } else {
+                         result_content = `Error: Tool \`read_file\` was called without a valid 'paths' array.`;
+                    }
+                }
+                
+                if (result_content) {
+                    conversationHistory.push({ role: 'system', content: result_content });
+                }
+            } catch (e) {
+                console.warn(`Could not parse arguments for tool ${call.name}: ${call.arguments}`);
+            }
+        }
     }
-
-    // This simplified model doesn't handle deletions. This is a limitation.
-    // A future improvement could be to have the AI output a 'DELETE' operation in a special block.
-
-    return { explanation, operations };
 };

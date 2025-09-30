@@ -1,11 +1,10 @@
 
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Project, ProjectFile, ChatMessage, FileOperation, BlueprintFile, FileOperationType } from '../types';
+import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
 import { getProject, saveProject } from '../services/projectService';
 import { runAIAgentWorkflow, AIConversationalError } from '../services/aiService';
 import { createProjectZip, createPreviewHtml } from '../utils/fileUtils';
-import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, MenuIcon, XIcon, CloudUploadIcon, SpinnerIcon } from './Icons';
+import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, MenuIcon, XIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon } from './Icons';
 import { TypingIndicator } from './Loader';
 import FileTree from './FileTree';
 import CodeEditor from './CodeEditor';
@@ -17,6 +16,7 @@ interface ProjectEditorProps {
 }
 
 type MobileView = 'files' | 'editor' | 'chat';
+type ToastType = { id: number; message: string; type: 'success' | 'error' | 'info' };
 
 /**
  * Sends a signal to the preview window via localStorage to trigger a refresh.
@@ -64,6 +64,33 @@ const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): 
   return updatedFiles;
 };
 
+const FileOperationsSummary: React.FC<{ operations: FileOperation[] }> = ({ operations }) => {
+    if (!operations || operations.length === 0) return null;
+
+    const getIcon = (op: FileOperation['operation']) => {
+        switch (op) {
+            case 'CREATE': return <FilePlusIcon className="w-5 h-5 text-green-400" />;
+            case 'UPDATE': return <FileEditIcon className="w-5 h-5 text-blue-400" />;
+            case 'DELETE': return <FileMinusIcon className="w-5 h-5 text-red-400" />;
+            default: return null;
+        }
+    };
+
+    return (
+        <div className="mt-3 border-t border-slate-600/50 pt-3">
+            <h4 className="text-sm font-semibold text-slate-300 mb-2">Changes Applied:</h4>
+            <ul className="space-y-1.5">
+                {operations.map((op, index) => (
+                    <li key={index} className="flex items-center gap-3 text-sm">
+                        {getIcon(op.operation)}
+                        <span className="font-mono text-slate-400 break-all">{op.path}</span>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+};
+
 
 const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> = ({ chatHistory, isLoading }) => {
     const chatEndRef = useRef<HTMLDivElement>(null);
@@ -83,6 +110,7 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
                         )}
                         <div className={`max-w-[85%] lg:max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
                             <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 font-mono text-sm">$1</code>') }}></p>
+                            <FileOperationsSummary operations={msg.operations || []} />
                         </div>
                         {msg.role === 'user' && (
                           <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0 mt-1">
@@ -98,11 +126,26 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
     );
 }
 
+const funFacts = [
+  "The first website ever created is still online today.",
+  "CSS stands for Cascading Style Sheets.",
+  "JavaScript was created in just 10 days by Brendan Eich.",
+  "The most common HTTP status code is 200 OK.",
+  "Dark mode can save battery life on OLED screens.",
+  "There are over 1.9 billion websites on the internet.",
+  "You can center a div with 'display: flex; justify-content: center; align-items: center;'.",
+  "'<!-- ... -->' is how you write a comment in HTML.",
+  "The 'async' and 'await' keywords in JavaScript make asynchronous code easier to read.",
+  "TailwindCSS is a utility-first CSS framework for rapid UI development."
+];
+
 const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [project, setProject] = useState<Project | null>(null);
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [aiThoughts, setAiThoughts] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastType[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [editorContent, setEditorContent] = useState<string>('');
   const [isEditorDirty, setIsEditorDirty] = useState(false);
@@ -112,11 +155,31 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [funFactIndex, setFunFactIndex] = useState(0);
   const projectRef = useRef<Project | null>(null);
+
+  useEffect(() => {
+    if (isLoading) {
+      const factInterval = setInterval(() => {
+        setFunFactIndex(prevIndex => (prevIndex + 1) % funFacts.length);
+      }, 5000); // Change fact every 5 seconds
+
+      return () => clearInterval(factInterval);
+    }
+  }, [isLoading]);
 
   useEffect(() => {
       projectRef.current = project;
   }, [project]);
+
+  const showToast = useCallback((message: string, type: ToastType['type'] = 'info') => {
+    const newToast: ToastType = { id: Date.now(), message, type };
+    setToasts(prev => [...prev, newToast]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== newToast.id));
+    }, 4000);
+  }, []);
+
 
   useEffect(() => {
     const setAppHeight = () => {
@@ -132,17 +195,14 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   useEffect(() => {
     getProject(projectId).then(p => {
         if (p) {
-            // Add defaults for projects created before template/style properties existed
             const projectWithDefaults: Project = {
                 ...p,
-                // FIX: Changed default template from deprecated 'vanilla' to 'blank'.
                 template: p.template || 'blank',
                 styleLibrary: p.styleLibrary || 'none',
                 currentSessionId: p.currentSessionId || Math.random().toString(36).substring(2, 9),
             };
 
             setProject(projectWithDefaults);
-            // Save back if defaults were added
             if (!p.template || !p.styleLibrary || !p.currentSessionId) {
                 saveProject(projectWithDefaults).catch(err => {
                     console.error("Failed to save project with new defaults:", err);
@@ -169,7 +229,6 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
       setSelectedFilePath(path);
       setEditorContent(file.content);
       setIsEditorDirty(false);
-      // Switch to editor view on mobile for better UX
       if (window.innerWidth < 1024) {
         setActiveView('editor');
       }
@@ -198,17 +257,18 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     setProject(updatedProject);
     await saveProject(updatedProject);
     setIsEditorDirty(false);
+    showToast(`${selectedFilePath} saved successfully!`, 'success');
 
     if (signal) {
       signalPreviewUpdate(project.id);
     }
-  }, [project, selectedFilePath, editorContent, isEditorDirty]);
+  }, [project, selectedFilePath, editorContent, isEditorDirty, showToast]);
 
   const handleSendMessage = useCallback(async () => {
     if (!userInput.trim() || !project) return;
 
     if (isEditorDirty) {
-        if (confirm('Anda memiliki perubahan yang belum disimpan di editor. Simpan sebelum mengirim pesan?')) {
+        if (confirm('You have unsaved changes in the editor. Save before sending message?')) {
             await handleSaveFile({ signal: false });
         }
     }
@@ -217,7 +277,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     const originalTimestamp = project.updatedAt;
     setUserInput('');
     setIsLoading(true);
-    setError(null);
+    setAiThoughts([]);
     
     let workingProject = projectRef.current!;
 
@@ -229,24 +289,30 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     const userMessage: ChatMessage = { role: 'user', content: userGoal };
     applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, userMessage] }));
 
-    try {
-        // New Single API Call Workflow
-        const { explanation, operations } = await runAIAgentWorkflow(userGoal, workingProject.files, workingProject.template, workingProject.styleLibrary);
+    const handleNewThought = (thought: string) => {
+        setAiThoughts(prev => [...prev, thought]);
+    };
 
-        // 1. Show the explanation from the AI as its response.
-        const explanationMessage: ChatMessage = { role: 'assistant', content: explanation };
+    try {
+        const { explanation, operations } = await runAIAgentWorkflow(
+            userGoal, 
+            workingProject.files, 
+            workingProject.template, 
+            workingProject.styleLibrary,
+            handleNewThought
+        );
+        
+        const explanationMessage: ChatMessage = { role: 'assistant', content: explanation, operations };
         applyUpdate(p => ({
             ...p,
             chatHistory: [...p.chatHistory, explanationMessage]
         }));
         
-        // 2. Apply the file operations if any were generated
         if (operations.length > 0) {
             let currentFiles = workingProject.files;
             for (const op of operations) {
                 currentFiles = applyOperation(currentFiles, op);
                 
-                // Update editor if the selected file was changed
                 if (op.path === selectedFilePath) {
                     if(op.operation === 'DELETE') { 
                         setSelectedFilePath(null);
@@ -254,7 +320,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                     } else {
                         setEditorContent(op.content ?? '');
                     }
-                    setIsEditorDirty(false); // Changes came from AI, so editor is not "dirty" from user's perspective
+                    setIsEditorDirty(false);
                 }
             }
             
@@ -264,26 +330,23 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                 updatedAt: Date.now(),
             }));
         }
-        // No extra success message needed as the explanation covers it.
     
     } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Terjadi kesalahan yang tidak diketahui.';
-        setError(`Gagal mendapatkan respons dari AI: ${errorMessage}`);
-        const finalMessage: ChatMessage = { role: 'assistant', content: `Maaf, terjadi kesalahan: ${errorMessage}` };
+        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+        showToast(`Failed to get AI response: ${errorMessage}`, 'error');
+        const finalMessage: ChatMessage = { role: 'assistant', content: `Sorry, an error occurred: ${errorMessage}` };
         applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, finalMessage] }));
     } finally {
         setIsLoading(false);
-        // Sync the final state back to the ref and save to DB
         projectRef.current = workingProject;
         if (projectRef.current) {
             await saveProject(projectRef.current);
-            // If the project was updated, signal the preview to refresh
             if (projectRef.current.updatedAt > originalTimestamp) {
                 signalPreviewUpdate(projectRef.current.id);
             }
         }
     }
-  }, [project, userInput, isEditorDirty, selectedFilePath, handleSaveFile]);
+  }, [project, userInput, isEditorDirty, selectedFilePath, handleSaveFile, showToast]);
 
   const handleNewChat = useCallback(async () => {
     if (!project || isLoading) return;
@@ -303,14 +366,13 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     if (project && project.files.length > 0) {
       window.open(`/#/preview/${project.id}`, '_blank');
     } else {
-      alert('Tidak ada file untuk dipratinjau.');
+      showToast('There are no files to preview.', 'info');
     }
   };
   
   const handlePublish = useCallback(async () => {
     if (!project || isPublishing) return;
     setIsPublishing(true);
-    setError(null);
     try {
         const previewHtml = createPreviewHtml(project.files);
         const payload = {
@@ -345,11 +407,11 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         setIsShareModalOpen(true);
     } catch (e) {
         const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred.';
-        setError(`Failed to publish: ${errorMessage}`);
+        showToast(`Failed to publish: ${errorMessage}`, 'error');
     } finally {
         setIsPublishing(false);
     }
-  }, [project, isPublishing]);
+  }, [project, isPublishing, showToast]);
 
 
   const handleDownload = async () => {
@@ -365,10 +427,10 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } catch (e) {
-        alert(`Gagal membuat file ZIP: ${e}`);
+        showToast(`Failed to create ZIP file: ${e}`, 'error');
       }
     } else {
-      alert('Tidak ada file untuk diunduh.');
+      showToast('There are no files to download.', 'error');
     }
   };
   
@@ -394,6 +456,15 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
   return (
     <div className="h-dynamic-screen w-screen flex flex-col bg-slate-900 overflow-hidden">
+        <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-3">
+            {toasts.map(toast => (
+                <div key={toast.id} className="toast-enter bg-slate-700 border border-slate-600 text-white py-3 px-5 rounded-lg shadow-2xl flex items-center gap-3">
+                    {toast.type === 'success' && <CheckCircleIcon className="w-5 h-5 text-green-400"/>}
+                    {toast.type === 'error' && <AlertTriangleIcon className="w-5 h-5 text-red-400"/>}
+                    <p>{toast.message}</p>
+                </div>
+            ))}
+        </div>
         {isMobileMenuOpen && (
             <div className="fixed inset-0 bg-slate-900 z-50 p-4 flex flex-col lg:hidden" role="dialog" aria-modal="true">
                 <div className="flex justify-between items-center mb-8">
@@ -475,7 +546,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
           </div>
         </aside>
 
-        <section className={`${isEditorFullscreen ? 'fixed inset-0 z-50 p-2 bg-slate-900' : 'lg:col-span-1'} ${activeView === 'editor' ? 'flex' : 'hidden'} flex-1 flex-col gap-4 lg:flex min-h-0`}>
+        <section className={`${isEditorFullscreen ? 'fixed inset-0 z-40 p-2 bg-slate-900' : 'lg:col-span-1'} ${activeView === 'editor' ? 'flex' : 'hidden'} flex-1 flex-col gap-4 lg:flex min-h-0`}>
           {selectedFilePath ? (
             <CodeEditor
               filePath={selectedFilePath}
@@ -495,35 +566,68 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
         <section className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'chat' ? 'flex' : 'hidden'} flex-1 flex-col gap-4 min-h-0 lg:flex lg:col-span-1`}>
             <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
-            {error && <div className="text-red-400 bg-red-900/50 p-3 rounded-md text-sm">{error}</div>}
-            <div className="flex gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
-                <textarea
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
-                    placeholder="Describe your changes..."
-                    className="flex-1 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                    rows={2}
-                    disabled={isLoading}
-                />
-                <div className="flex flex-col gap-2">
-                    <button
-                        onClick={handleSendMessage}
-                        disabled={isLoading || !userInput.trim()}
-                        className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center"
-                        aria-label="Send message"
-                    >
-                        <SendIcon className="w-5 h-5" />
-                    </button>
-                     <button
-                        onClick={handleNewChat}
+            <div className="flex flex-col gap-2">
+                {isLoading && (
+                    <div className="flex flex-col gap-3">
+                        <div className="p-3 bg-slate-900/30 rounded-lg border border-slate-700">
+                            <h4 className="text-sm font-semibold text-indigo-300 mb-2 flex items-center gap-2">
+                                <SpinnerIcon className="w-4 h-4" />
+                                AI is Working...
+                            </h4>
+                            {aiThoughts.length > 0 ? (
+                                <ul className="space-y-2 text-sm mt-3">
+                                    {aiThoughts.map((thought, index) => (
+                                        <li key={index} className="flex items-start gap-2.5">
+                                            {index < aiThoughts.length - 1 ? (
+                                                <CheckCircleIcon className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                                            ) : (
+                                                <SpinnerIcon className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+                                            )}
+                                            <span className={`${index < aiThoughts.length - 1 ? 'text-slate-400' : 'text-slate-200'}`} dangerouslySetInnerHTML={{ __html: thought.replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 font-mono text-xs">$1</code>') }}></span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p className="text-sm text-slate-400 mt-2">Initializing... please wait.</p>
+                            )}
+                        </div>
+                        <div className="p-3 bg-slate-900/30 rounded-lg border border-slate-700 flex items-center gap-3 animate-fade-in">
+                           <InfoIcon className="w-5 h-5 text-slate-500 flex-shrink-0"/>
+                            <p key={funFactIndex} className="text-sm text-slate-400">
+                                {funFacts[funFactIndex]}
+                            </p>
+                        </div>
+                    </div>
+                )}
+                <div className="flex gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
+                    <textarea
+                        value={userInput}
+                        onChange={(e) => setUserInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
+                        placeholder="Describe your changes..."
+                        className="flex-1 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                        rows={2}
                         disabled={isLoading}
-                        className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center"
-                        aria-label="Start new chat"
-                        title="New Chat"
-                    >
-                        <RefreshIcon className="w-5 h-5" />
-                    </button>
+                    />
+                    <div className="flex flex-col gap-2">
+                        <button
+                            onClick={handleSendMessage}
+                            disabled={isLoading || !userInput.trim()}
+                            className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center"
+                            aria-label="Send message"
+                        >
+                            <SendIcon className="w-5 h-5" />
+                        </button>
+                         <button
+                            onClick={handleNewChat}
+                            disabled={isLoading}
+                            className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center"
+                            aria-label="Start new chat"
+                            title="New Chat"
+                        >
+                            <RefreshIcon className="w-5 h-5" />
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
