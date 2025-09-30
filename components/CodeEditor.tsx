@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
 import { SaveIcon, MaximizeIcon, MinimizeIcon } from './Icons';
 
 interface CodeEditorProps {
@@ -13,25 +13,6 @@ interface CodeEditorProps {
 
 const CodeEditor: React.FC<CodeEditorProps> = ({ filePath, content, onChange, onSave, isDirty, isFullScreen, onToggleFullScreen }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const lineNumbersRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        updateLineNumbers();
-    }, [content]);
-    
-    const updateLineNumbers = () => {
-        if (lineNumbersRef.current) {
-            const lineCount = content.split('\n').length;
-            lineNumbersRef.current.innerHTML = Array.from({ length: lineCount }, (_, i) => `<span>${i + 1}</span>`).join('');
-        }
-    };
-    
-    const syncScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
-        if (lineNumbersRef.current) {
-            const el = e.currentTarget;
-            lineNumbersRef.current.scrollTop = el.scrollTop;
-        }
-    };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Handle Tab key
@@ -84,27 +65,18 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ filePath, content, onChange, on
                     </button>
                 </div>
             </div>
-            <div className="flex-1 relative bg-[#282c34] flex">
-                <div 
-                    ref={lineNumbersRef}
-                    className="h-full bg-[#21252b] text-right text-slate-500 p-4 font-mono text-sm select-none flex flex-col overflow-hidden"
-                    aria-hidden="true"
-                >
-                </div>
-                <div className="relative w-full h-full overflow-hidden">
-                    <textarea
-                        ref={textareaRef}
-                        value={content}
-                        onChange={(e) => onChange(e.target.value)}
-                        onScroll={syncScroll}
-                        onKeyDown={handleKeyDown}
-                        className="absolute inset-0 w-full h-full bg-transparent text-slate-200 caret-white font-mono text-sm p-4 border-none focus:outline-none focus:ring-0 resize-none leading-relaxed tracking-wide whitespace-pre"
-                        spellCheck="false"
-                        autoCapitalize="off"
-                        autoComplete="off"
-                        autoCorrect="off"
-                    />
-                </div>
+            <div className="flex-1 relative bg-[#282c34]">
+                <textarea
+                    ref={textareaRef}
+                    value={content}
+                    onChange={(e) => onChange(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    className="absolute inset-0 w-full h-full bg-transparent text-slate-200 caret-white font-mono text-sm p-4 border-none focus:outline-none focus:ring-0 resize-none leading-relaxed tracking-wide whitespace-pre"
+                    spellCheck="false"
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    autoCorrect="off"
+                />
             </div>
         </div>
     );
