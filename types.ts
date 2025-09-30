@@ -19,9 +19,18 @@ export interface Project {
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string | null;
   operations?: FileOperation[];
+  tool_calls?: {
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }[];
+  tool_call_id?: string;
 }
 
 export type FileOperationType = 'CREATE' | 'UPDATE' | 'DELETE';

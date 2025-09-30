@@ -1,5 +1,7 @@
 
 
+
+import OpenAI from 'https://esm.sh/openai@latest';
 import type { ProjectFile, ChatMessage, FileOperation, TemplateType, StyleLibrary } from '../types';
 
 let openAIKey: string | null = null;
@@ -46,44 +48,33 @@ export class AIConversationalError extends Error {
 const callAIAgent = async (conversationHistory: ChatMessage[], tools: any[]): Promise<any> => {
   try {
     const apiKey = await getOpenAIKey();
-    const API_URL = 'https://api.openai.com/v1/responses';
-
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-5',
-        input: conversationHistory,
-        tools: tools,
-        tool_choice: 'auto',
-        stream: false,
-      })
+    const openai = new OpenAI({
+      apiKey: apiKey,
+      dangerouslyAllowBrowser: true, // Required for client-side usage
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      // Try to parse the error for a more specific message
-      try {
-        const errorJson = JSON.parse(errorText);
-        if (errorJson.error && errorJson.error.message) {
-            throw new Error(`API request failed: ${response.status} ${JSON.stringify(errorJson.error)}`);
-        }
-      } catch (e) {
-        // Fallback to raw text if not valid JSON
-        throw new Error(`API request failed: ${response.status} ${errorText}`);
-      }
-    }
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: conversationHistory as any,
+      tools: tools,
+      tool_choice: 'auto',
+    });
 
-    const jsonResponse = await response.json();
+    const message = response.choices[0].message;
 
-    if (!jsonResponse) {
-        throw new Error('API response was empty.');
+    if (message.tool_calls) {
+      const functionCalls = message.tool_calls.map(tc => ({
+        id: tc.id,
+        type: 'function_call',
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+      }));
+      return { assistantMessage: message, functionCalls };
+    } else if (message.content) {
+      return { assistantMessage: message, conversationalText: message.content };
+    } else {
+      return { assistantMessage: message, functionCalls: [] };
     }
-    
-    return jsonResponse;
 
   } catch (error) {
     console.error(`Error calling AI:`, error);
@@ -117,67 +108,72 @@ export const runAIAgentWorkflow = async (
     const tools = [
         {
           type: "function",
-          name: "think",
-          description: "Records your internal monologue or plan for the user to see. Use this to outline your steps before reading files or applying changes. This helps the user understand your process.",
-          parameters: {
-            type: "object",
-            properties: {
-              thought: {
-                type: "string",
-                description: "Your thought process or what you plan to do next, in Indonesian. E.g., 'Saya akan membaca semua file untuk memahami struktur proyek.'"
-              }
-            },
-            required: ["thought"]
-          }
-        },
-        {
-          type: "function",
-          name: "read_file",
-          description: "Reads the full content of one or more files from the project to understand their contents. Provide a list of all paths you need to inspect.",
-          parameters: {
-            type: "object",
-            properties: {
-              paths: {
-                type: "array",
-                description: "An array of full file paths to read.",
-                items: {
-                    type: "string"
+          function: {
+            name: "think",
+            description: "Records your internal monologue or plan for the user to see. Use this to outline your steps before reading files or applying changes. This helps the user understand your process.",
+            parameters: {
+              type: "object",
+              properties: {
+                thought: {
+                  type: "string",
+                  description: "Your thought process or what you plan to do next, in Indonesian. E.g., 'Saya akan membaca semua file untuk memahami struktur proyek.'"
                 }
-              }
-            },
-            required: ["paths"]
-          }
-        },
-        {
-          type: "function",
-          name: "apply_project_changes",
-          description: "FINISHES the task. This is the final step. Call this function only when you have all the information and are ready to provide the complete code changes. It applies a set of file operations (CREATE, UPDATE, DELETE) to the project.",
-          parameters: {
-            type: "object",
-            properties: {
-              explanation: {
-                type: "string",
-                description: "A brief, user-facing explanation of the changes being made. E.g., 'Okay, I'll update the index.html file to add a new button and style it in style.css.'"
               },
-              operations: {
-                type: "array",
-                description: "A list of file operations to perform. For updates, provide the COMPLETE new file content.",
-                items: {
-                  type: "object",
-                  properties: {
-                    operation: { type: "string", description: "The type of operation.", enum: ["CREATE", "UPDATE", "DELETE"] },
-                    path: { type: "string", description: "The full path of the file to operate on." },
-                    content: { type: "string", description: "The full new content of the file. Required for CREATE and UPDATE. For DELETE, provide an empty string." }
-                  },
-                  required: ["operation", "path", "content"],
-                  additionalProperties: false
+              required: ["thought"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "read_file",
+            description: "Reads the full content of one or more files from the project to understand their contents. Provide a list of all paths you need to inspect.",
+            parameters: {
+              type: "object",
+              properties: {
+                paths: {
+                  type: "array",
+                  description: "An array of full file paths to read.",
+                  items: {
+                      type: "string"
+                  }
                 }
-              }
+              },
+              required: ["paths"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "apply_project_changes",
+            description: "FINISHES the task. This is the final step. Call this function only when you have all the information and are ready to provide the complete code changes. It applies a set of file operations (CREATE, UPDATE, DELETE) to the project.",
+            parameters: {
+              type: "object",
+              properties: {
+                explanation: {
+                  type: "string",
+                  description: "A brief, user-facing explanation of the changes being made. E.g., 'Okay, I'll update the index.html file to add a new button and style it in style.css.'"
+                },
+                operations: {
+                  type: "array",
+                  description: "A list of file operations to perform. For updates, provide the COMPLETE new file content.",
+                  items: {
+                    type: "object",
+                    properties: {
+                      operation: { type: "string", description: "The type of operation.", enum: ["CREATE", "UPDATE", "DELETE"] },
+                      path: { type: "string", description: "The full path of the file to operate on." },
+                      content: { type: "string", description: "The full new content of the file. Required for CREATE and UPDATE. For DELETE, provide an empty string." }
+                    },
+                    required: ["operation", "path", "content"],
+                    additionalProperties: false
+                  }
+                }
+              },
+              required: ["explanation", "operations"],
+              additionalProperties: false
             },
-            required: ["explanation", "operations"],
-            additionalProperties: false
-          },
-          strict: true
+          }
         }
     ];
     
@@ -214,27 +210,20 @@ export const runAIAgentWorkflow = async (
 
         const responseJson = await callAIAgent(conversationHistory, tools);
         
-        const assistantResponse = responseJson.output;
-        if (!assistantResponse || !Array.isArray(assistantResponse)) {
-            const conversationalText = responseJson.text?.content;
-             if (conversationalText) {
-                throw new AIConversationalError(`The AI responded conversationally: ${conversationalText}`);
-            }
-            console.error("AI response did not contain a valid output array:", responseJson);
-            throw new Error('AI returned an invalid response format.');
+        if (responseJson.assistantMessage) {
+            conversationHistory.push(responseJson.assistantMessage as ChatMessage);
         }
 
-        const functionCalls = assistantResponse.filter((o: any) => o.type === 'function_call');
+        const functionCalls = responseJson.functionCalls;
+        const conversationalText = responseJson.conversationalText;
 
-        if (functionCalls.length > 0) {
-            const toolCallSummary = functionCalls.map((call: any) => {
-                return `Calling tool \`${call.name}\` with arguments: ${call.arguments}`;
-            }).join('\n');
-            
-            conversationHistory.push({
-                role: 'assistant',
-                content: toolCallSummary,
-            });
+        if (conversationalText) {
+            throw new AIConversationalError(`The AI responded conversationally: ${conversationalText}`);
+        }
+
+        if (!functionCalls || !Array.isArray(functionCalls)) {
+            console.error("AI response did not contain a valid function call array:", responseJson);
+            throw new Error('AI returned an invalid response format.');
         }
         
         const finalCall = functionCalls.find((c: any) => c.name === 'apply_project_changes');
@@ -251,13 +240,7 @@ export const runAIAgentWorkflow = async (
             }
         }
 
-        if (functionCalls.length === 0) {
-            const conversationalText = assistantResponse.find((o: any) => o.type === 'text')?.content;
-            if (conversationalText) {
-                throw new AIConversationalError(`The AI responded conversationally instead of using a tool: ${conversationalText}`);
-            }
-        }
-
+        const toolResponses = [];
         for (const call of functionCalls) {
             try {
                 const args = JSON.parse(call.arguments);
@@ -287,11 +270,23 @@ export const runAIAgentWorkflow = async (
                 }
                 
                 if (result_content) {
-                    conversationHistory.push({ role: 'system', content: result_content });
+                    toolResponses.push({
+                        role: 'tool',
+                        tool_call_id: call.id,
+                        content: result_content,
+                    });
                 }
             } catch (e) {
                 console.warn(`Could not parse arguments for tool ${call.name}: ${call.arguments}`);
+                 toolResponses.push({
+                    role: 'tool',
+                    tool_call_id: call.id,
+                    content: `Error: Failed to parse arguments for tool ${call.name}. Error: ${e instanceof Error ? e.message : String(e)}`,
+                });
             }
+        }
+        if (toolResponses.length > 0) {
+            conversationHistory.push(...toolResponses as any[]);
         }
     }
 };
