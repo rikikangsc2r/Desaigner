@@ -124,7 +124,7 @@ export const runAIAgentWorkflow = async (
             properties: {
               thought: {
                 type: "string",
-                description: "Your thought process or what you plan to do next, in Indonesian. E.g., 'Baik, saya perlu melihat file index.html untuk memahami strukturnya.'"
+                description: "Your thought process or what you plan to do next, in Indonesian. E.g., 'Saya akan membaca semua file untuk memahami struktur proyek.'"
               }
             },
             required: ["thought"]
@@ -190,14 +190,13 @@ export const runAIAgentWorkflow = async (
 *   **Tech Stack:** The project is built using **${stackDescription}**.
 *   **Available Files:**\n${fileList}
 
-**YOUR WORKFLOW (LOOP):**
-1.  **Think:** Use the 'think' tool to outline your plan in Indonesian. E.g., "Baik, saya akan membaca file index.html dan style.css."
-2.  **Read:** Use the 'read_file' tool with a list of file paths to inspect multiple files at once. You do NOT have the file contents initially.
-3.  **Analyze:** After you read a file, its content will be provided to you in a system message. You MUST analyze this content in your next step to decide what to do. DO NOT read the same file again unless absolutely necessary.
-4.  **Repeat:** Continue thinking and reading until you have all necessary information.
-5.  **Apply Changes:** Once you are ready to write the code, call 'apply_project_changes'. This is your FINAL action and will stop the loop.
+**YOUR WORKFLOW (EFFICIENT & DIRECT):**
+1.  **Initial Plan & Read:** Start by using the 'think' tool to briefly state your initial strategy in Indonesian. In the same turn, use the 'read_file' tool to read ALL files you need to inspect. This should be one single 'read_file' call for efficiency.
+2.  **Final Plan:** After you receive the file contents, use the 'think' tool one last time to outline your complete and final implementation plan.
+3.  **Apply Changes:** Immediately after stating your final plan, call 'apply_project_changes' with all the necessary code. This is your final action.
 
 **CORE PRINCIPLES:**
+*   **BE EFFICIENT:** Avoid multiple 'think' calls back-to-back. Plan, read, finalize plan, then execute.
 *   **COMPLETE CODE:** When updating a file, you MUST provide the ENTIRE file content from start to finish.
 *   **PRODUCTION QUALITY:** Write clean, efficient, and responsive code.`;
 
