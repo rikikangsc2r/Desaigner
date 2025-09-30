@@ -57,12 +57,10 @@ const buildFileContext = (files: ProjectFile[]): string => {
   return context;
 };
 
+// FIX: Refactored function to remove deprecated 'html' and 'vanilla' template types.
+// This now provides a correct base description for all modern project templates.
 const getStackDescription = (template: TemplateType, styleLibrary: StyleLibrary): string => {
-    let stack = '';
-    switch (template) {
-        case 'html': stack = 'Single-file HTML'; break;
-        case 'vanilla': stack = 'HTML, CSS, and JavaScript'; break;
-    }
+    let stack = 'HTML, CSS, and JavaScript';
     if (styleLibrary === 'bootstrap') {
         stack += ' and Bootstrap';
     } else if (styleLibrary === 'tailwindcss') {

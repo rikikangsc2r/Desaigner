@@ -77,8 +77,8 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
                 {chatHistory.filter(msg => msg.role !== 'system').map((msg, index) => (
                     <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                         {msg.role === 'assistant' && (
-                           <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30">
-                             <BotIcon className="w-5 h-5 text-indigo-400" />
+                           <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30">
+                             <BotIcon className="w-5 h-5 text-indigo-100" />
                            </div>
                         )}
                         <div className={`max-w-[85%] lg:max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
@@ -91,7 +91,7 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
                         )}
                     </div>
                 ))}
-                {isLoading && <div className="flex items-start gap-3"><div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30"><BotIcon className="w-5 h-5 text-indigo-400" /></div><TypingIndicator/></div>}
+                {isLoading && <div className="flex items-start gap-3"><div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30"><BotIcon className="w-5 h-5 text-indigo-100" /></div><TypingIndicator/></div>}
                 <div ref={chatEndRef} />
             </div>
         </div>
@@ -135,7 +135,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
             // Add defaults for projects created before template/style properties existed
             const projectWithDefaults: Project = {
                 ...p,
-                template: p.template || 'vanilla',
+                // FIX: Changed default template from deprecated 'vanilla' to 'blank'.
+                template: p.template || 'blank',
                 styleLibrary: p.styleLibrary || 'none',
                 currentSessionId: p.currentSessionId || Math.random().toString(36).substring(2, 9),
             };
@@ -509,7 +510,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                     <button
                         onClick={handleSendMessage}
                         disabled={isLoading || !userInput.trim()}
-                        className="p-3 bg-indigo-600 text-white rounded-lg disabled:bg-slate-600 disabled:cursor-not-allowed hover:bg-indigo-500 transition-all flex-1 flex justify-center items-center"
+                        className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center"
                         aria-label="Send message"
                     >
                         <SendIcon className="w-5 h-5" />

@@ -2,16 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { getProjects, saveProject, deleteProject } from '../services/projectService';
 import { getTemplateFiles } from '../services/templates';
 import type { Project, TemplateType, StyleLibrary } from '../types';
-import { PlusIcon, TrashIcon, CodeIcon } from './Icons';
+import { PlusIcon, TrashIcon, CodeIcon, FolderIcon, BoxIcon, IdCardIcon, NewspaperIcon, RocketIcon } from './Icons';
 import ConfirmModal from './ConfirmModal';
 
 interface ProjectListProps {
   onSelectProject: (id: string) => void;
 }
 
-const templates: { id: TemplateType; name: string; desc: string }[] = [
-    { id: 'html', name: 'Single File HTML', desc: 'A single HTML file to get started quickly.' },
-    { id: 'vanilla', name: 'HTML, CSS, JS', desc: 'A classic starting point for any web project.' },
+const projectTemplates: { id: TemplateType; name: string; desc: string; Icon: React.FC<{className?: string;}> }[] = [
+    { id: 'blank', name: 'Blank Project', desc: 'A classic starting point with HTML, CSS, and JS.', Icon: BoxIcon },
+    { id: 'portfolio', name: 'Portfolio', desc: 'A simple, clean page to showcase your work.', Icon: IdCardIcon },
+    { id: 'blog', name: 'Blog', desc: 'A classic blog layout with a main content area and sidebar.', Icon: NewspaperIcon },
+    { id: 'landing-page', name: 'Landing Page', desc: 'A hero section, features, and a call-to-action.', Icon: RocketIcon },
 ];
 
 const styles: { id: StyleLibrary; name: string }[] = [
@@ -20,20 +22,25 @@ const styles: { id: StyleLibrary; name: string }[] = [
     { id: 'bootstrap', name: 'Bootstrap' },
 ];
 
-// FIX: Moved TemplateButton outside of ProjectList to prevent re-creation on each render and fix typing issues with the `key` prop.
 const TemplateButton: React.FC<{ 
   id: TemplateType; 
   name: string; 
   desc: string; 
   isSelected: boolean; 
-  onSelect: (id: TemplateType) => void; 
-}> = ({ id, name, desc, isSelected, onSelect }) => (
+  onSelect: (id: TemplateType) => void;
+  Icon: React.FC<{className?: string}>;
+}> = ({ id, name, desc, isSelected, onSelect, Icon }) => (
     <button 
       onClick={() => onSelect(id)}
-      className={`p-4 border-2 rounded-lg text-left transition-all duration-200 ${isSelected ? 'border-indigo-500 bg-indigo-900/30 ring-2 ring-indigo-500' : 'border-slate-700 hover:border-slate-500 bg-slate-700/30'}`}
+      className={`p-4 border-2 rounded-lg text-left transition-all duration-200 flex items-center gap-4 ${isSelected ? 'border-indigo-500 bg-indigo-900/30 ring-2 ring-indigo-500' : 'border-slate-700 hover:border-indigo-500/50 bg-slate-800'}`}
     >
-      <h3 className="font-bold text-lg text-slate-100">{name}</h3>
-      <p className="text-sm text-slate-400 mt-1">{desc}</p>
+      <div className="p-3 bg-slate-700/50 rounded-lg">
+        <Icon className="w-6 h-6 text-indigo-400" />
+      </div>
+      <div>
+        <h3 className="font-bold text-lg text-slate-100">{name}</h3>
+        <p className="text-sm text-slate-400 mt-1">{desc}</p>
+      </div>
     </button>
 );
 
@@ -44,7 +51,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
-  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('vanilla');
+  const [selectedTemplate, setSelectedTemplate] = useState<TemplateType>('blank');
   const [selectedStyle, setSelectedStyle] = useState<StyleLibrary>('none');
 
   useEffect(() => {
@@ -121,9 +128,9 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
               </div>
 
               <div className="mb-6">
-                <label className="block text-sm font-medium text-slate-300 mb-3">Select a Template</label>
+                <label className="block text-sm font-medium text-slate-300 mb-3">Choose a Starting Point</label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {templates.map(t => (
+                    {projectTemplates.map(t => (
                       <TemplateButton 
                         key={t.id} 
                         {...t} 
@@ -162,17 +169,22 @@ const ProjectList: React.FC<ProjectListProps> = ({ onSelectProject }) => {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {projects.map(project => (
-              <div key={project.id} className="group bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl shadow-lg flex flex-col justify-between hover:border-indigo-500/80 transition-all duration-300">
-                <div className="p-5 cursor-pointer flex-grow" onClick={() => onSelectProject(project.id)}>
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-bold text-lg truncate text-slate-100 pr-8">{project.name}</h3>
-                    <button onClick={(e) => { e.stopPropagation(); handleDeleteRequest(project); }} className="absolute top-3 right-3 text-slate-500 hover:text-red-500 p-2 rounded-full transition-colors opacity-50 group-hover:opacity-100">
-                      <TrashIcon className="w-5 h-5"/>
-                    </button>
-                  </div>
-                  <p className="text-sm text-slate-400 mt-2">
-                    {project.files.length} file{project.files.length !== 1 ? 's' : ''}
-                  </p>
+              <div key={project.id} className="group bg-slate-800 rounded-xl shadow-lg flex flex-col justify-between transition-all duration-300 border border-slate-700 hover:border-indigo-500/80 hover:shadow-indigo-500/10 hover:shadow-2xl hover:-translate-y-1">
+                <div className="p-5 cursor-pointer flex-grow flex flex-col" onClick={() => onSelectProject(project.id)}>
+                    <div className="flex-grow">
+                        <div className="flex justify-between items-start">
+                            <div className="p-3 bg-slate-700/50 rounded-lg inline-block">
+                                <FolderIcon className="w-6 h-6 text-indigo-400" />
+                            </div>
+                            <button onClick={(e) => { e.stopPropagation(); handleDeleteRequest(project); }} className="text-slate-500 hover:text-red-500 p-2 -mr-2 -mt-2 rounded-full transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100" aria-label={`Delete project ${project.name}`}>
+                                <TrashIcon className="w-5 h-5"/>
+                            </button>
+                        </div>
+                        <h3 className="font-bold text-lg mt-4 text-slate-100">{project.name}</h3>
+                    </div>
+                    <p className="text-sm text-slate-400 mt-2">
+                        {project.files.length} file{project.files.length !== 1 ? 's' : ''}
+                    </p>
                 </div>
                 <div className="bg-slate-800/30 px-5 py-3 border-t border-slate-700">
                    <p className="text-xs text-slate-500">

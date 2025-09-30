@@ -126,3 +126,38 @@ export const SpinnerIcon: React.FC<{className?: string}> = ({className}) => (
         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
     </svg>
 );
+
+export const BoxIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg {...iconProps} className={className || iconProps.className}>
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+        <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+);
+
+export const IdCardIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg {...iconProps} className={className || iconProps.className}>
+        <rect width="20" height="16" x="2" y="4" rx="2" />
+        <circle cx="9" cy="10" r="2" />
+        <path d="M15 14v-2a2 2 0 0 0-2-2h-2" />
+        <path d="M15 8h2" />
+    </svg>
+);
+
+export const NewspaperIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg {...iconProps} className={className || iconProps.className}>
+        <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h4v18H4Z" />
+        <path d="M12 18h6" />
+        <path d="M12 14h6" />
+        <path d="M12 10h6" />
+    </svg>
+);
+
+export const RocketIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg {...iconProps} className={className || iconProps.className}>
+        <path d="M4 12.55v-3.08a2 2 0 0 1 1.29-1.87l5.4-2.4a2 2 0 0 1 2.59 1.88v10.15a2 2 0 0 1-2.59 1.88l-5.4-2.4A2 2 0 0 1 4 15.63v-3.08Z" />
+        <path d="M12 16v-4" />
+        <path d="m16 18-3-3" />
+        <path d="M20 12c0-2-3-3-3-3s-3 1-3 3 3 3 3 3" />
+    </svg>
+);
