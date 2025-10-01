@@ -36,7 +36,8 @@ const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
                     setHtmlContent(data.previewHtml);
                     setForkableProjectData({
                         files: data.files,
-                        template: data.template || 'vanilla',
+                        // FIX: The 'vanilla' template type is deprecated. Default to 'blank'.
+                        template: data.template || 'blank',
                         styleLibrary: data.styleLibrary || 'none',
                         name: data.name || `Fork of ${blobId.substring(0,8)}`
                     });
@@ -46,7 +47,8 @@ const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
                     setHtmlContent(data.html);
                     setForkableProjectData({
                         files: [{ path: 'index.html', content: data.html }],
-                        template: 'html',
+                        // FIX: The 'html' template type is deprecated and invalid. Use 'blank' for backward compatibility.
+                        template: 'blank',
                         styleLibrary: 'none',
                         name: `Fork of ${blobId.substring(0,8)}`
                     });

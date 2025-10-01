@@ -193,6 +193,7 @@ export const runAIAgentWorkflow = async (
 3.  **Apply Changes:** Immediately after stating your final plan, call 'apply_project_changes' with all the necessary code. This is your final action.
 
 **CORE PRINCIPLES:**
+*   **TOOL USE IS MANDATORY:** You CANNOT provide code directly in your conversational response. All file modifications MUST be performed by calling the \`apply_project_changes\` tool. This is the ONLY way your changes will be applied.
 *   **BE EFFICIENT:** Avoid multiple 'think' calls back-to-back. Plan, read, finalize plan, then execute.
 *   **COMPLETE CODE:** When updating a file, you MUST provide the ENTIRE file content from start to finish.
 *   **PRODUCTION QUALITY:** Write clean, efficient, and responsive code.`;
