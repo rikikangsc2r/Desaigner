@@ -174,6 +174,14 @@ ${fileContentsWithPaths}
 1.  **Plan:** Use the 'think' tool to briefly state your implementation plan in Indonesian.
 2.  **Execute:** In the SAME turn, immediately call 'apply_project_changes' with all the necessary code.
 
+**JSON FORMATTING RULES for 'apply_project_changes':**
+*   The 'arguments' parameter MUST be a single, valid, non-indented JSON string.
+*   Do NOT wrap the JSON string in markdown backticks (\`\`\`).
+*   Ensure all strings within the JSON, especially file content, are properly escaped (e.g., newlines as \\n, quotes as \\").
+*   The JSON object MUST have two top-level keys: "explanation" (string) and "operations" (array of objects).
+*   Example of a valid argument string:
+    '{"explanation":"This updates the main title.","operations":[{"operation":"UPDATE","path":"index.html","content":"<!DOCTYPE html>..."}]}'
+
 **CORE PRINCIPLES:**
 *   **DO NOT ask to read files.** You already have the full content of all files.
 *   **COMPLETE CODE:** When updating a file, you MUST provide the ENTIRE new file content from start to finish.
@@ -214,12 +222,28 @@ ${fileContentsWithPaths}
             try {
                 const args = JSON.parse(finalCall.arguments);
                 if (!args.explanation || !Array.isArray(args.operations)) {
-                    throw new Error('AI returned malformed arguments for file operations.');
+                    throw new Error('Malformed arguments: `explanation` string or `operations` array is missing.');
+                }
+                // Extra validation for operations array
+                if (args.operations.some((op: any) => typeof op.operation !== 'string' || typeof op.path !== 'string' || typeof op.content !== 'string')) {
+                    throw new Error('Malformed arguments: one or more operations are missing required fields (operation, path, content).');
                 }
                 return args as { explanation: string; operations: FileOperation[] };
             } catch (e) {
-                console.error("Failed to parse apply_project_changes arguments:", finalCall.arguments, e);
-                throw new Error("AI returned invalid data structure for file changes.");
+                console.error("Failed to parse or validate apply_project_changes arguments:", finalCall.arguments, e);
+
+                // Self-correction mechanism: Instead of throwing, give the AI feedback to fix its mistake.
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                const feedbackToAI = `The tool call 'apply_project_changes' failed because the 'arguments' parameter was invalid. Please fix the error and call the tool again. Error details: ${errorMessage}. Remember, the argument must be a valid JSON string with 'explanation' and 'operations' fields.`;
+                
+                conversationHistory.push({
+                    role: 'tool',
+                    tool_call_id: finalCall.id,
+                    content: feedbackToAI,
+                } as ChatMessage);
+                
+                // Continue the loop to allow the AI to retry.
+                continue;
             }
         }
 
