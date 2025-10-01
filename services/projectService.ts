@@ -69,7 +69,7 @@ export const getProject = async (id: string): Promise<Project | null> => {
                     }
                 }
             } catch(e) {
-                if (e.message.includes('No such file or directory')) {
+                if (e.code === 'subject_does_not_exist') {
                      console.log(`Directory not found, skipping: ${currentPath}`);
                 } else {
                     throw e;
@@ -105,7 +105,10 @@ export const saveProject = async (project: Project): Promise<void> => {
     try {
         await puter.fs.delete(filesPath, { recursive: true });
     } catch(e) {
-        // It's okay if it doesn't exist
+        // It's okay if it doesn't exist. We check for the specific code.
+        if (e.code !== 'subject_does_not_exist') {
+            console.error('An unexpected error occurred while cleaning the project directory. The operation will proceed, but there might be leftover files.', e);
+        }
     }
     await puter.fs.mkdir(filesPath, { createMissingParents: true });
 
