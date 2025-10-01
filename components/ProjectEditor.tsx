@@ -18,14 +18,12 @@ type MainView = 'editor' | 'chat';
 type MobileView = 'files' | 'editor' | 'chat';
 type ToastType = { id: number; message: string; type: 'success' | 'error' | 'info' };
 
-type AiModel = 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5' | 'gpt-4o' | 'gpt-4o-mini' | 'o1-mini';
-const aiModels: { id: AiModel | string, name: string }[] = [
-    { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
-    { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
-    { id: 'gpt-5', name: 'GPT-5' },
-    { id: 'gpt-4o', name: 'GPT-4o' },
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
-    { id: 'o1-mini', name: 'o1 Mini' },
+type AiModel = string;
+const aiModels: { id: AiModel, name: string }[] = [
+    { id: 'google/gemini-2.0-flash-lite-001', name: 'Gemini 2.0 Flash Lite' },
+    { id: 'google/gemini-2.5-pro-exp-03-25:free', name: 'Gemini 2.5 Pro' },
+    { id: 'google/gemini-flash-1.5-8b', name: 'Gemini 1.5 Flash' },
+    { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
 ];
 
 const signalPreviewUpdate = (projectId: string) => {
@@ -152,8 +150,8 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
 
 interface ChatInputProps {
   isMobile?: boolean;
-  selectedModel: AiModel | string;
-  setSelectedModel: (model: AiModel | string) => void;
+  selectedModel: AiModel;
+  setSelectedModel: (model: AiModel) => void;
   isLoading: boolean;
   userInput: string;
   setUserInput: (input: string) => void;
@@ -229,7 +227,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<AiModel | string>('gpt-5-nano');
+  const [selectedModel, setSelectedModel] = useState<AiModel>('google/gemini-2.0-flash-lite-001');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const projectRef = useRef<Project | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
