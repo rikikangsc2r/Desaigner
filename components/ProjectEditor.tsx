@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
 import { getProject, saveProject } from '../services/projectService';
-import { streamAIAgentWorkflow } from '../services/aiService';
+import { runAIAgentLoop } from '../services/aiService';
 import { createProjectZip, createPreviewHtml } from '../utils/fileUtils';
 import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, MenuIcon, XIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon } from './Icons';
 import { TypingIndicator } from './Loader';
@@ -75,6 +75,27 @@ const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): 
   return updatedFiles;
 };
 
+const ThinkingLog: React.FC<{ thoughts: string[] }> = ({ thoughts }) => {
+    if (!thoughts || thoughts.length === 0) return null;
+
+    return (
+        <div className="mt-3 border-t border-slate-600/50 pt-3">
+            <h4 className="text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
+                <SpinnerIcon className="w-4 h-4" />
+                Thinking...
+            </h4>
+            <ul className="space-y-1.5 text-sm text-slate-400 pl-4">
+                {thoughts.map((thought, index) => (
+                    <li key={index} className="break-words relative pl-4 before:content-['▸'] before:absolute before:left-0 before:top-0 before:text-indigo-400">
+                        {thought}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+};
+
+
 const FileOperationsSummary: React.FC<{ operations: FileOperation[] }> = ({ operations }) => {
     if (!operations || operations.length === 0) return null;
 
@@ -89,7 +110,7 @@ const FileOperationsSummary: React.FC<{ operations: FileOperation[] }> = ({ oper
 
     return (
         <div className="mt-3 border-t border-slate-600/50 pt-3">
-            <h4 className="text-sm font-semibold text-slate-300 mb-2">Changes Applied:</h4>
+            <h4 className="text-sm font-semibold text-slate-300 mb-2">File Actions:</h4>
             <ul className="space-y-1.5">
                 {operations.map((op, index) => (
                     <li key={index} className="flex items-center gap-3 text-sm">
@@ -103,16 +124,16 @@ const FileOperationsSummary: React.FC<{ operations: FileOperation[] }> = ({ oper
 };
 
 
-const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> = ({ chatHistory, isLoading }) => {
+const ChatWindow: React.FC<{ chatHistory: ChatMessage[] }> = ({ chatHistory }) => {
     const chatEndRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatHistory, isLoading]);
+    }, [chatHistory]);
 
     return (
         <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl flex-1 flex flex-col overflow-hidden">
             <div className="flex-1 space-y-4 overflow-y-auto p-4">
-                {chatHistory.filter(msg => msg.role !== 'system').map((msg, index) => (
+                {chatHistory.filter(msg => msg.role !== 'system' && msg.role !== 'tool').map((msg, index) => (
                     <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                         {msg.role === 'assistant' && (
                            <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30">
@@ -120,8 +141,15 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
                            </div>
                         )}
                         <div className={`max-w-[85%] lg:max-w-md p-3 rounded-lg ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
-                            <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 font-mono text-sm">$1</code>') }}></p>
+                            {msg.content && (
+                              <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 font-mono text-sm">$1</code>') }}></p>
+                            )}
+                            <ThinkingLog thoughts={msg.thoughts || []} />
                             <FileOperationsSummary operations={msg.operations || []} />
+                            
+                            {!msg.content && (!msg.thoughts || msg.thoughts.length === 0) && (!msg.operations || msg.operations.length === 0) && (
+                                <TypingIndicator />
+                            )}
                         </div>
                         {msg.role === 'user' && (
                           <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0 mt-1">
@@ -130,25 +158,11 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
                         )}
                     </div>
                 ))}
-                {isLoading && chatHistory[chatHistory.length - 1]?.role !== 'assistant' && <div className="flex items-start gap-3"><div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30"><BotIcon className="w-5 h-5 text-indigo-100" /></div><TypingIndicator/></div>}
                 <div ref={chatEndRef} />
             </div>
         </div>
     );
 }
-
-const funFacts = [
-  "The first website ever created is still online today.",
-  "CSS stands for Cascading Style Sheets.",
-  "JavaScript was created in just 10 days by Brendan Eich.",
-  "The most common HTTP status code is 200 OK.",
-  "Dark mode can save battery life on OLED screens.",
-  "There are over 1.9 billion websites on the internet.",
-  "You can center a div with 'display: flex; justify-content: center; align-items: center;'.",
-  "'<!-- ... -->' is how you write a comment in HTML.",
-  "The 'async' and 'await' keywords in JavaScript make asynchronous code easier to read.",
-  "TailwindCSS is a utility-first CSS framework for rapid UI development."
-];
 
 const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [project, setProject] = useState<Project | null>(null);
@@ -165,19 +179,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [funFactIndex, setFunFactIndex] = useState(0);
   const [selectedModel, setSelectedModel] = useState<AiModel | string>('gpt-5-nano');
   const projectRef = useRef<Project | null>(null);
-
-  useEffect(() => {
-    if (isLoading) {
-      const factInterval = setInterval(() => {
-        setFunFactIndex(prevIndex => (prevIndex + 1) % funFacts.length);
-      }, 5000); // Change fact every 5 seconds
-
-      return () => clearInterval(factInterval);
-    }
-  }, [isLoading]);
 
   useEffect(() => {
       projectRef.current = project;
@@ -285,122 +288,107 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     }
 
     const userGoal = userInput;
-    const originalTimestamp = project.updatedAt;
     setIsLoading(true);
     setError(null);
     
     const userMessage: ChatMessage = { role: 'user', content: userGoal };
-    const assistantMessagePlaceholder: ChatMessage = { role: 'assistant', content: '' };
+    const assistantMessagePlaceholder: ChatMessage = { role: 'assistant', content: null, thoughts: [], operations: [] };
     
-    const newHistory = [...project.chatHistory, userMessage, assistantMessagePlaceholder];
+    const currentChatHistory = project.chatHistory;
+    const newHistory = [...currentChatHistory, userMessage, assistantMessagePlaceholder];
     const projectWithUserMessage = { ...project, chatHistory: newHistory };
+    
     setProject(projectWithUserMessage);
     projectRef.current = projectWithUserMessage;
     
     setUserInput('');
 
-    let responseBuffer = '';
-    let lastUiUpdate = 0;
-
-    const updateStreamingMessage = (content: string) => {
+    const onThink = (thought: string) => {
         setProject(p => {
             if (!p) return null;
             const history = [...p.chatHistory];
             const lastMsg = history[history.length - 1];
             if (lastMsg?.role === 'assistant') {
-                lastMsg.content = content;
+                lastMsg.thoughts = [...(lastMsg.thoughts || []), thought];
             }
             const newProj = { ...p, chatHistory: history };
             projectRef.current = newProj;
             return newProj;
         });
     };
-    
-    try {
-        await streamAIAgentWorkflow(
-            userGoal, 
-            projectRef.current.files, 
-            projectRef.current.template, 
-            projectRef.current.styleLibrary,
-            selectedModel,
-            (chunk) => {
-                responseBuffer += chunk;
-                if (Date.now() - lastUiUpdate > 100) {
-                    updateStreamingMessage(responseBuffer + '▒');
-                    lastUiUpdate = Date.now();
-                }
-            },
-            (err) => {
-                setError(err.message);
-                updateStreamingMessage(`Sorry, an error occurred during streaming: ${err.message}`);
+
+    const onWrite = async (path: string, content: string): Promise<string> => {
+        const currentProject = projectRef.current;
+        if (!currentProject) return "Error: Project context lost.";
+
+        const opType = currentProject.files.some(f => f.path === path) ? 'UPDATE' : 'CREATE';
+        const operation: FileOperation = { operation: opType, path, content };
+        const updatedFiles = applyOperation(currentProject.files, operation);
+
+        if (path === selectedFilePath) {
+            setEditorContent(content);
+            setIsEditorDirty(false);
+        }
+
+        setProject(p => {
+            if (!p) return null;
+            const history = [...p.chatHistory];
+            const lastMsg = history[history.length - 1];
+            if (lastMsg?.role === 'assistant') {
+                lastMsg.operations = [...(lastMsg.operations || []), operation];
             }
-        );
+            const newProj = { ...p, files: updatedFiles, chatHistory: history, updatedAt: Date.now() };
+            projectRef.current = newProj;
+            saveProject(newProj);
+            signalPreviewUpdate(newProj.id);
+            return newProj;
+        });
 
-        updateStreamingMessage(responseBuffer);
-        
-        let jsonString = responseBuffer;
-        if (jsonString.startsWith('```json')) {
-            jsonString = jsonString.slice(7);
-        }
-        if (jsonString.endsWith('```')) {
-            jsonString = jsonString.slice(0, -3);
-        }
-        jsonString = jsonString.trim();
+        return `File "${path}" written successfully.`;
+    };
 
-        if (!jsonString) {
-            throw new Error("AI returned an empty response.");
-        }
-
-        const { explanation, operations } = JSON.parse(jsonString) as { explanation: string; operations: FileOperation[] };
-        
-        let currentFiles = projectRef.current.files;
-        if (operations && operations.length > 0) {
-            for (const op of operations) {
-                currentFiles = applyOperation(currentFiles, op);
-                
-                if (op.path === selectedFilePath) {
-                    if(op.operation === 'DELETE') { 
-                        setSelectedFilePath(null);
-                        setEditorContent('');
-                    } else {
-                        setEditorContent(op.content ?? '');
-                    }
-                    setIsEditorDirty(false);
-                }
+    const onFinish = (summary: string) => {
+        setProject(p => {
+            if (!p) return null;
+            const history = [...p.chatHistory];
+            const lastMsg = history[history.length - 1];
+            if (lastMsg?.role === 'assistant') {
+                lastMsg.content = summary;
             }
-        }
-        
-        const finalAssistantMessage: ChatMessage = {
-            role: 'assistant',
-            content: explanation,
-            operations,
-        };
-        
-        const finalProjectState = {
-            ...projectRef.current,
-            files: currentFiles,
-            updatedAt: Date.now(),
-            chatHistory: [
-                ...projectRef.current.chatHistory.slice(0, -1),
-                finalAssistantMessage,
-            ],
-        };
-        
-        setProject(finalProjectState);
-        projectRef.current = finalProjectState;
-        await saveProject(finalProjectState);
-
-        if (finalProjectState.updatedAt > originalTimestamp) {
-            signalPreviewUpdate(finalProjectState.id);
-        }
-    
-    } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-        showToast(`AI task failed: ${errorMessage}`, 'error');
-        updateStreamingMessage(`Sorry, an error occurred: ${errorMessage}\n\n**Raw Response:**\n\`\`\`\n${responseBuffer}\n\`\`\``);
-    } finally {
+            const newProj = { ...p, chatHistory: history };
+            projectRef.current = newProj;
+            saveProject(newProj);
+            return newProj;
+        });
         setIsLoading(false);
-    }
+    };
+
+    const onError = (err: Error) => {
+        showToast(`AI task failed: ${err.message}`, 'error');
+        setProject(p => {
+            if (!p) return null;
+            const history = [...p.chatHistory];
+            const lastMsg = history[history.length - 1];
+            if (lastMsg?.role === 'assistant') {
+                lastMsg.content = `Sorry, an error occurred: ${err.message}`;
+            }
+            return { ...p, chatHistory: history };
+        });
+        setIsLoading(false);
+    };
+
+    await runAIAgentLoop(
+        userGoal,
+        projectRef.current.files,
+        projectRef.current.template,
+        projectRef.current.styleLibrary,
+        selectedModel,
+        currentChatHistory,
+        onThink,
+        onWrite,
+        onFinish,
+        onError
+    );
   }, [project, userInput, isEditorDirty, selectedFilePath, handleSaveFile, showToast, selectedModel]);
 
   const handleNewChat = useCallback(async () => {
@@ -620,16 +608,8 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         </section>
 
         <section className={`${isEditorFullscreen ? 'hidden' : ''} ${activeView === 'chat' ? 'flex' : 'hidden'} flex-1 flex-col gap-4 min-h-0 lg:flex lg:col-span-1`}>
-            <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
+            <ChatWindow chatHistory={project.chatHistory} />
             <div className="flex flex-col gap-2">
-                {isLoading && (
-                    <div className="p-3 bg-slate-900/30 rounded-lg border border-slate-700 flex items-center gap-3 animate-fade-in">
-                        <InfoIcon className="w-5 h-5 text-slate-500 flex-shrink-0"/>
-                        <p key={funFactIndex} className="text-sm text-slate-400">
-                            {funFacts[funFactIndex]}
-                        </p>
-                    </div>
-                )}
                 <div className="p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
                     <div className="flex items-center gap-2 mb-2 px-1">
                         <label htmlFor="ai-model-selector" className="text-xs font-medium text-slate-400">Model:</label>

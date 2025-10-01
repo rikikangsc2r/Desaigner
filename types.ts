@@ -22,6 +22,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string | null;
   operations?: FileOperation[];
+  thoughts?: string[];
   tool_calls?: {
     id: string;
     type: 'function';
