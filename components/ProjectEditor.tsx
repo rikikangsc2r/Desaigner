@@ -3,11 +3,12 @@ import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types'
 import { getProject, saveProject } from '../services/projectService';
 import { runAIAgentWorkflow, AIConversationalError } from '../services/aiService';
 import { createProjectZip, createPreviewHtml } from '../utils/fileUtils';
-import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon, GripVerticalIcon, MenuIcon } from './Icons';
+import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon, GripVerticalIcon, MenuIcon, LogOutIcon } from './Icons';
 import { TypingIndicator } from './Loader';
 import FileTree from './FileTree';
 import CodeEditor from './CodeEditor';
 import ShareModal from './ShareModal';
+import { useAuth } from '../auth';
 
 interface ProjectEditorProps {
   projectId: string;
@@ -232,6 +233,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const projectRef = useRef<Project | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const { user, isSignedIn, isLoading: isAuthLoading, signOut } = useAuth();
 
   useEffect(() => { projectRef.current = project; }, [project]);
 
@@ -427,6 +429,17 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         <button onClick={onBack} className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors p-2 rounded-lg hover:bg-slate-700"> <BackIcon /> <span className="font-medium hidden sm:inline">Projects</span> </button>
         <h2 className="text-xl font-bold text-slate-100 truncate mx-2 text-center">{project.name}</h2>
         <div className="flex items-center gap-2">
+            {isAuthLoading ? (
+              <SpinnerIcon />
+            ) : isSignedIn && user ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-slate-300 hidden md:inline">Hi, {user.username}</span>
+                <button onClick={signOut} title="Sign Out" className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors">
+                  <LogOutIcon />
+                </button>
+                <div className="w-px h-6 bg-slate-600" />
+              </div>
+            ) : null}
             <button onClick={handlePublish} disabled={isPublishing} title="Publish Website" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors disabled:bg-slate-600 disabled:cursor-wait">{isPublishing ? <SpinnerIcon /> : <CloudUploadIcon />}</button>
             <button onClick={handlePreview} title="Preview Website" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors"><EyeIcon /></button>
             <button onClick={handleDownload} title="Download Project" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors"><DownloadIcon /></button>
