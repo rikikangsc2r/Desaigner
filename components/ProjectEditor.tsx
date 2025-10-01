@@ -150,6 +150,67 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
     );
 }
 
+interface ChatInputProps {
+  isMobile?: boolean;
+  selectedModel: AiModel | string;
+  setSelectedModel: (model: AiModel | string) => void;
+  isLoading: boolean;
+  userInput: string;
+  setUserInput: (input: string) => void;
+  handleSendMessage: () => void;
+  handleNewChat: () => void;
+}
+
+const ChatInput: React.FC<ChatInputProps> = ({
+  isMobile,
+  selectedModel,
+  setSelectedModel,
+  isLoading,
+  userInput,
+  setUserInput,
+  handleSendMessage,
+  handleNewChat,
+}) => (
+   <div className={`flex flex-col gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl ${isMobile ? 'bg-slate-800/95 backdrop-blur-sm !rounded-none !border-none !border-t !border-slate-700' : ''}`}>
+      <div className="flex items-center gap-2 px-1">
+          <label htmlFor={`ai-model-selector-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs font-medium text-slate-400">Model:</label>
+          <select id={`ai-model-selector-${isMobile ? 'mobile' : 'desktop'}`} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={isLoading} className="flex-1 bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60">
+              {aiModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+          </select>
+      </div>
+      <div className="flex gap-2">
+          <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="Describe your changes..." className="flex-1 bg-slate-700/50 border border-slate-600 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows={isMobile ? 1 : 2} disabled={isLoading} />
+          <div className={`flex gap-2 ${isMobile ? 'flex-col-reverse' : 'flex-col'}`}>
+              <button onClick={handleSendMessage} disabled={isLoading || !userInput.trim()} className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center" aria-label="Send message"><SendIcon className="w-5 h-5" /></button>
+              {!isMobile && <button onClick={handleNewChat} disabled={isLoading} className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center" aria-label="Start new chat" title="New Chat"><RefreshIcon className="w-5 h-5" /></button>}
+          </div>
+      </div>
+    </div>
+);
+
+
+interface BottomNavProps {
+  mobileView: MobileView;
+  setMobileView: (view: MobileView) => void;
+  selectedFilePath: string | null;
+}
+
+const BottomNav: React.FC<BottomNavProps> = ({ mobileView, setMobileView, selectedFilePath }) => (
+  <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-800/80 backdrop-blur-sm border-t border-slate-700 flex justify-around p-1 z-40">
+      {(['files', 'editor', 'chat'] as MobileView[]).map(view => {
+          const isDisabled = view === 'editor' && !selectedFilePath;
+          const Icon = { files: CodeIcon, editor: EditIcon, chat: BotIcon }[view];
+          return (
+              <button key={view} disabled={isDisabled} onClick={() => setMobileView(view)} className={`flex flex-col items-center gap-1 p-2 rounded-md w-20 transition-colors ${mobileView === view ? 'text-indigo-400' : 'text-slate-400 hover:text-white'} disabled:opacity-50`}>
+                  <Icon className="w-6 h-6" />
+                  <span className="text-xs capitalize">{view}</span>
+              </button>
+          )
+      })}
+  </div>
+);
+
+
 const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [project, setProject] = useState<Project | null>(null);
   const [userInput, setUserInput] = useState('');
@@ -354,39 +415,6 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     document.addEventListener('mouseup', handleMouseUp);
   }, [sidebarWidth]);
 
-  const BottomNav = () => (
-    <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-slate-800/80 backdrop-blur-sm border-t border-slate-700 flex justify-around p-1 z-40">
-        {(['files', 'editor', 'chat'] as MobileView[]).map(view => {
-            const isDisabled = view === 'editor' && !selectedFilePath;
-            const Icon = { files: CodeIcon, editor: EditIcon, chat: BotIcon }[view];
-            return (
-                <button key={view} disabled={isDisabled} onClick={() => setMobileView(view)} className={`flex flex-col items-center gap-1 p-2 rounded-md w-20 transition-colors ${mobileView === view ? 'text-indigo-400' : 'text-slate-400 hover:text-white'} disabled:opacity-50`}>
-                    <Icon className="w-6 h-6" />
-                    <span className="text-xs capitalize">{view}</span>
-                </button>
-            )
-        })}
-    </div>
-  );
-  
-  const ChatInput = ({ isMobile }: { isMobile?: boolean }) => (
-     <div className={`flex flex-col gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl ${isMobile ? 'bg-slate-800/95 backdrop-blur-sm !rounded-none !border-none !border-t !border-slate-700' : ''}`}>
-        <div className="flex items-center gap-2 px-1">
-            <label htmlFor={`ai-model-selector-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs font-medium text-slate-400">Model:</label>
-            <select id={`ai-model-selector-${isMobile ? 'mobile' : 'desktop'}`} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={isLoading} className="flex-1 bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60">
-                {aiModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-            </select>
-        </div>
-        <div className="flex gap-2">
-            <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="Describe your changes..." className="flex-1 bg-slate-700/50 border border-slate-600 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows={isMobile ? 1 : 2} disabled={isLoading} />
-            <div className={`flex gap-2 ${isMobile ? 'flex-col-reverse' : 'flex-col'}`}>
-                <button onClick={handleSendMessage} disabled={isLoading || !userInput.trim()} className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center" aria-label="Send message"><SendIcon className="w-5 h-5" /></button>
-                {!isMobile && <button onClick={handleNewChat} disabled={isLoading} className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center" aria-label="Start new chat" title="New Chat"><RefreshIcon className="w-5 h-5" /></button>}
-            </div>
-        </div>
-      </div>
-  );
-
   if (error) return ( <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-900 p-4"> <h2 className="text-2xl font-bold text-red-400 mb-4">Gagal Memuat Proyek</h2> <p className="text-slate-300 text-center mb-6">{error}</p> <button onClick={onBack} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded-lg"> <BackIcon /> Kembali </button> </div> );
   if (!project) return ( <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-950"> <SpinnerIcon className="h-16 w-16 text-indigo-500" /> <p className="mt-4 text-slate-300">Loading Project...</p> </div> );
 
@@ -450,7 +478,15 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                 </div>
             </div>
             <div className="flex-shrink-0">
-               <ChatInput />
+               <ChatInput
+                 isLoading={isLoading}
+                 userInput={userInput}
+                 setUserInput={setUserInput}
+                 handleSendMessage={handleSendMessage}
+                 handleNewChat={handleNewChat}
+                 selectedModel={selectedModel}
+                 setSelectedModel={setSelectedModel}
+               />
             </div>
         </div>
       </main>
@@ -474,11 +510,20 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         {mobileView === 'chat' && (
             <div className="flex flex-col h-full min-h-0">
                 <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
-                <ChatInput isMobile={true} />
+                <ChatInput
+                  isMobile={true}
+                  isLoading={isLoading}
+                  userInput={userInput}
+                  setUserInput={setUserInput}
+                  handleSendMessage={handleSendMessage}
+                  handleNewChat={handleNewChat}
+                  selectedModel={selectedModel}
+                  setSelectedModel={setSelectedModel}
+                />
             </div>
         )}
       </main>
-      {!isEditorFullscreen && <BottomNav />}
+      {!isEditorFullscreen && <BottomNav mobileView={mobileView} setMobileView={setMobileView} selectedFilePath={selectedFilePath} />}
 
       <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} title="Project Published!" url={publishedUrl} />
     </div>
