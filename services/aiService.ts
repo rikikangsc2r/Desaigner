@@ -1,36 +1,7 @@
+// Add a global declaration for the `puter` object from the script tag
+declare const puter: any;
 
-
-
-import OpenAI from 'https://esm.sh/openai@latest';
 import type { ProjectFile, ChatMessage, FileOperation, TemplateType, StyleLibrary } from '../types';
-
-let openAIKey: string | null = null;
-
-/**
- * Fetches and caches the OpenAI API key from the proxy service.
- */
-const getOpenAIKey = async (): Promise<string> => {
-    if (openAIKey) {
-        return openAIKey;
-    }
-    try {
-        const response = await fetch('https://purxy.vercel.app/api/openaikey');
-        if (!response.ok) {
-            throw new Error(`Failed to fetch API key with status: ${response.status}`);
-        }
-        const data = await response.json();
-        if (data && data.success && data.extractedContent) {
-            openAIKey = data.extractedContent;
-            return openAIKey;
-        } else {
-            throw new Error('Invalid response from API key provider.');
-        }
-    } catch (error) {
-        console.error('Error fetching OpenAI key:', error);
-        throw new Error('Could not retrieve the necessary API key to contact the AI.');
-    }
-};
-
 
 /**
  * Custom error for when the AI returns a conversational response instead of the expected format.
@@ -43,37 +14,66 @@ export class AIConversationalError extends Error {
 }
 
 /**
- * A generic function to call the new AI API.
+ * A generic function to call the Puter.js AI API.
  */
 const callAIAgent = async (conversationHistory: ChatMessage[], tools: any[]): Promise<any> => {
   try {
-    const apiKey = await getOpenAIKey();
-    const openai = new OpenAI({
-      apiKey: apiKey,
-      dangerouslyAllowBrowser: true, // Required for client-side usage
-    });
-
-    const response = await openai.chat.completions.create({
-      model: 'gpt-5',
-      messages: conversationHistory as any,
+    // Puter.js AI doesn't take a structured history, so we serialize it into a single prompt string.
+    const prompt = conversationHistory.map(message => {
+        let contentRepresentation = '';
+        if (message.role === 'system' || message.role === 'user') {
+            contentRepresentation = message.content || '';
+        } else if (message.role === 'assistant') {
+            if (message.tool_calls) {
+                const toolCallSummary = message.tool_calls.map(t => ({ name: t.function.name, arguments: t.function.arguments }));
+                contentRepresentation = `Assistant wants to call tools: ${JSON.stringify(toolCallSummary)}`;
+            } else {
+                contentRepresentation = message.content || '';
+            }
+        } else if (message.role === 'tool') {
+            contentRepresentation = `Result for tool call ID ${message.tool_call_id}: ${message.content}`;
+        }
+        return `[${message.role.toUpperCase()}]\n${contentRepresentation}`;
+    }).join('\n\n');
+    
+    // Call the Puter.js AI with the serialized prompt and tools
+    const response = await puter.ai.chat(prompt, {
+      model: 'gpt-5-nano',
       tools: tools,
-      tool_choice: 'auto',
     });
+    
+    const message = response.message;
 
-    const message = response.choices[0].message;
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      // The app's logic requires a unique ID for each tool call to map responses.
+      // We'll add a unique ID to each tool call from the AI.
+      message.tool_calls.forEach((tc: any) => {
+        tc.id = `call_${Math.random().toString(36).substring(2, 9)}`;
+        tc.type = 'function'; // Ensure type is present for compatibility
+      });
 
-    if (message.tool_calls) {
-      const functionCalls = message.tool_calls.map(tc => ({
+      const functionCalls = message.tool_calls.map((tc: any) => ({
         id: tc.id,
         type: 'function_call',
         name: tc.function.name,
         arguments: tc.function.arguments,
       }));
-      return { assistantMessage: message, functionCalls };
+      
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: message.content || null,
+        tool_calls: message.tool_calls,
+      };
+      
+      return { assistantMessage, functionCalls };
+
     } else if (message.content) {
-      return { assistantMessage: message, conversationalText: message.content };
+      const assistantMessage: ChatMessage = { role: 'assistant', content: message.content };
+      return { assistantMessage, conversationalText: message.content };
+
     } else {
-      return { assistantMessage: message, functionCalls: [] };
+      const assistantMessage: ChatMessage = { role: 'assistant', content: null };
+      return { assistantMessage, functionCalls: [] };
     }
 
   } catch (error) {
@@ -81,6 +81,7 @@ const callAIAgent = async (conversationHistory: ChatMessage[], tools: any[]): Pr
     throw error;
   }
 };
+
 
 // FIX: Refactored function to remove deprecated 'html' and 'vanilla' template types.
 // This now provides a correct base description for all modern project templates.
