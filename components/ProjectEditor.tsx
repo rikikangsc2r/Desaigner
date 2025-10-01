@@ -3,7 +3,7 @@ import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types'
 import { getProject, saveProject } from '../services/projectService';
 import { runAIAgentWorkflow, AIConversationalError } from '../services/aiService';
 import { createProjectZip, createPreviewHtml } from '../utils/fileUtils';
-import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon, GripVerticalIcon } from './Icons';
+import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon, GripVerticalIcon, MenuIcon } from './Icons';
 import { TypingIndicator } from './Loader';
 import FileTree from './FileTree';
 import CodeEditor from './CodeEditor';
@@ -169,9 +169,21 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [publishedUrl, setPublishedUrl] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<AiModel | string>('gpt-5-nano');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const projectRef = useRef<Project | null>(null);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { projectRef.current = project; }, [project]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(event.target as Node)) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const showToast = useCallback((message: string, type: ToastType['type'] = 'info') => {
     const newToast: ToastType = { id: Date.now(), message, type };
@@ -185,11 +197,6 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     setAppHeight();
     return () => window.removeEventListener('resize', setAppHeight);
   }, []);
-
-  const effectiveView = useMemo(() => {
-    if (window.innerWidth < 1024) return mobileView;
-    return mainView;
-  }, [mobileView, mainView]);
 
   useEffect(() => {
     getProject(projectId).then(p => {
@@ -361,50 +368,27 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         })}
     </div>
   );
+  
+  const ChatInput = ({ isMobile }: { isMobile?: boolean }) => (
+     <div className={`flex flex-col gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl ${isMobile ? 'bg-slate-800/95 backdrop-blur-sm !rounded-none !border-none !border-t !border-slate-700' : ''}`}>
+        <div className="flex items-center gap-2 px-1">
+            <label htmlFor={`ai-model-selector-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs font-medium text-slate-400">Model:</label>
+            <select id={`ai-model-selector-${isMobile ? 'mobile' : 'desktop'}`} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={isLoading} className="flex-1 bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60">
+                {aiModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+            </select>
+        </div>
+        <div className="flex gap-2">
+            <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="Describe your changes..." className="flex-1 bg-slate-700/50 border border-slate-600 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows={isMobile ? 1 : 2} disabled={isLoading} />
+            <div className={`flex gap-2 ${isMobile ? 'flex-col-reverse' : 'flex-col'}`}>
+                <button onClick={handleSendMessage} disabled={isLoading || !userInput.trim()} className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center" aria-label="Send message"><SendIcon className="w-5 h-5" /></button>
+                {!isMobile && <button onClick={handleNewChat} disabled={isLoading} className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center" aria-label="Start new chat" title="New Chat"><RefreshIcon className="w-5 h-5" /></button>}
+            </div>
+        </div>
+      </div>
+  );
 
   if (error) return ( <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-900 p-4"> <h2 className="text-2xl font-bold text-red-400 mb-4">Gagal Memuat Proyek</h2> <p className="text-slate-300 text-center mb-6">{error}</p> <button onClick={onBack} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded-lg"> <BackIcon /> Kembali </button> </div> );
   if (!project) return ( <div className="w-screen h-screen flex flex-col justify-center items-center bg-slate-950"> <SpinnerIcon className="h-16 w-16 text-indigo-500" /> <p className="mt-4 text-slate-300">Loading Project...</p> </div> );
-
-  const renderMobileView = () => {
-      switch(mobileView) {
-          case 'files': return (
-              <aside className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl flex flex-col h-full">
-                  <h3 className="text-lg font-semibold p-4 border-b border-slate-700 flex items-center gap-2"><CodeIcon /> Project Files</h3>
-                  <div className="flex-grow overflow-y-auto p-2"><FileTree files={project.files} onSelectFile={handleSelectFile} selectedFile={selectedFilePath} /></div>
-              </aside>
-          );
-          case 'editor': 
-          case 'chat': return (
-            <div className="flex flex-col h-full min-h-0">
-                <div className="flex-1 min-h-0">
-                    {effectiveView === 'editor' ? (
-                      selectedFilePath ? <CodeEditor filePath={selectedFilePath} content={editorContent} onChange={handleEditorChange} onSave={handleSaveFile} isDirty={isEditorDirty} isFullScreen={isEditorFullscreen} onToggleFullScreen={() => setIsEditorFullscreen(p => !p)} /> 
-                      : <div className="flex h-full justify-center items-center bg-slate-800/50 border border-slate-700 rounded-xl"><p className="text-slate-400">Pilih file untuk diedit</p></div>
-                    ) : (
-                      <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
-                    )}
-                </div>
-                <div className="flex-shrink-0 pt-4">
-                  <div className="flex flex-col gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
-                    <div className="flex items-center gap-2 px-1">
-                        <label htmlFor="ai-model-selector" className="text-xs font-medium text-slate-400">Model:</label>
-                        <select id="ai-model-selector" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={isLoading} className="flex-1 bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60">
-                            {aiModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="flex gap-2">
-                        <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Describe your changes..." className="flex-1 bg-slate-700/50 border border-slate-600 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows={2} disabled={isLoading} />
-                        <div className="flex flex-col gap-2">
-                            <button onClick={handleSendMessage} disabled={isLoading || !userInput.trim()} className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center" aria-label="Send message"><SendIcon className="w-5 h-5" /></button>
-                            <button onClick={handleNewChat} disabled={isLoading} className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center" aria-label="Start new chat" title="New Chat"><RefreshIcon className="w-5 h-5" /></button>
-                        </div>
-                    </div>
-                  </div>
-                </div>
-            </div>
-          );
-      }
-  };
 
   return (
     <div className="h-dynamic-screen w-screen flex flex-col bg-slate-900 overflow-hidden">
@@ -416,9 +400,32 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
         <button onClick={onBack} className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors p-2 rounded-lg hover:bg-slate-700"> <BackIcon /> <span className="font-medium hidden sm:inline">Projects</span> </button>
         <h2 className="text-xl font-bold text-slate-100 truncate mx-2 text-center">{project.name}</h2>
         <div className="flex items-center gap-2">
-          <button onClick={handlePublish} disabled={isPublishing} title="Publish Website" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors disabled:bg-slate-600 disabled:cursor-wait">{isPublishing ? <SpinnerIcon /> : <CloudUploadIcon />}</button>
-          <button onClick={handlePreview} title="Preview Website" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors"><EyeIcon /></button>
-          <button onClick={handleDownload} title="Download Project" className="p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors"><DownloadIcon /></button>
+            <button onClick={handlePublish} disabled={isPublishing} title="Publish Website" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors disabled:bg-slate-600 disabled:cursor-wait">{isPublishing ? <SpinnerIcon /> : <CloudUploadIcon />}</button>
+            <button onClick={handlePreview} title="Preview Website" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors"><EyeIcon /></button>
+            <button onClick={handleDownload} title="Download Project" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors"><DownloadIcon /></button>
+            
+            <div className="lg:hidden relative" ref={mobileMenuRef}>
+                <button onClick={() => setIsMobileMenuOpen(p => !p)} className="p-2 rounded-lg hover:bg-slate-700 text-slate-300 hover:text-white">
+                    <MenuIcon />
+                </button>
+                {isMobileMenuOpen && (
+                    <div className="absolute top-full right-0 mt-2 w-56 bg-slate-800 border border-slate-700 rounded-md shadow-lg z-50 py-1 transition-opacity duration-200">
+                        <button onClick={() => { handlePublish(); setIsMobileMenuOpen(false); }} disabled={isPublishing} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:opacity-50">
+                            {isPublishing ? <SpinnerIcon /> : <CloudUploadIcon />} Publish Website
+                        </button>
+                        <button onClick={() => { handlePreview(); setIsMobileMenuOpen(false); }} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700">
+                            <EyeIcon /> Preview Website
+                        </button>
+                        <button onClick={() => { handleDownload(); setIsMobileMenuOpen(false); }} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700">
+                            <DownloadIcon /> Download Project
+                        </button>
+                        <div className="my-1 h-px bg-slate-700" />
+                        <button onClick={() => { handleNewChat(); setIsMobileMenuOpen(false); }} disabled={isLoading} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:opacity-50">
+                            <RefreshIcon /> Start New Chat
+                        </button>
+                    </div>
+                )}
+            </div>
         </div>
       </header>
       
@@ -443,30 +450,35 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                 </div>
             </div>
             <div className="flex-shrink-0">
-                <div className="flex flex-col gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
-                    <div className="flex items-center gap-2 px-1">
-                        <label htmlFor="ai-model-selector-desktop" className="text-xs font-medium text-slate-400">Model:</label>
-                        <select id="ai-model-selector-desktop" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={isLoading} className="flex-1 bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60">
-                            {aiModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-                        </select>
-                    </div>
-                    <div className="flex gap-2">
-                        <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Describe your changes..." className="flex-1 bg-slate-700/50 border border-slate-600 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows={2} disabled={isLoading} />
-                        <div className="flex flex-col gap-2">
-                            <button onClick={handleSendMessage} disabled={isLoading || !userInput.trim()} className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center" aria-label="Send message"><SendIcon className="w-5 h-5" /></button>
-                            <button onClick={handleNewChat} disabled={isLoading} className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center" aria-label="Start new chat" title="New Chat"><RefreshIcon className="w-5 h-5" /></button>
-                        </div>
-                    </div>
-                </div>
+               <ChatInput />
             </div>
         </div>
       </main>
 
       {/* Mobile Layout */}
-      <main className="lg:hidden flex-1 overflow-y-auto p-4 pb-20">
-        {renderMobileView()}
+      <main className={`lg:hidden flex-1 flex flex-col overflow-hidden pb-16 ${isEditorFullscreen ? 'fixed inset-0 z-50 bg-slate-900 p-0 pb-0' : ''}`}>
+        {mobileView === 'files' && (
+            <aside className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl flex flex-col h-full m-4">
+                <h3 className="text-lg font-semibold p-4 border-b border-slate-700 flex items-center gap-2"><CodeIcon /> Project Files</h3>
+                <div className="flex-grow overflow-y-auto p-2"><FileTree files={project.files} onSelectFile={handleSelectFile} selectedFile={selectedFilePath} /></div>
+            </aside>
+        )}
+        {mobileView === 'editor' && (
+            <div className="flex-1 flex flex-col min-h-0 p-4">
+                {selectedFilePath 
+                    ? <CodeEditor filePath={selectedFilePath} content={editorContent} onChange={handleEditorChange} onSave={handleSaveFile} isDirty={isEditorDirty} isFullScreen={isEditorFullscreen} onToggleFullScreen={() => setIsEditorFullscreen(p => !p)} /> 
+                    : <div className="flex h-full justify-center items-center bg-slate-800/50 border border-slate-700 rounded-xl"><p className="text-slate-400">Pilih file untuk diedit</p></div>
+                }
+            </div>
+        )}
+        {mobileView === 'chat' && (
+            <div className="flex flex-col h-full min-h-0">
+                <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
+                <ChatInput isMobile={true} />
+            </div>
+        )}
       </main>
-      <BottomNav />
+      {!isEditorFullscreen && <BottomNav />}
 
       <ShareModal isOpen={isShareModalOpen} onClose={() => setIsShareModalOpen(false)} title="Project Published!" url={publishedUrl} />
     </div>
