@@ -20,10 +20,11 @@ type ToastType = { id: number; message: string; type: 'success' | 'error' | 'inf
 
 type AiModel = string;
 const aiModels: { id: AiModel, name: string }[] = [
-    { id: 'google/gemini-2.0-flash-lite-001', name: 'Gemini 2.0 Flash Lite' },
-    { id: 'google/gemini-2.5-pro-exp-03-25:free', name: 'Gemini 2.5 Pro' },
-    { id: 'google/gemini-flash-1.5-8b', name: 'Gemini 1.5 Flash' },
-    { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+    { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
+    { id: 'o1-mini', name: 'O1 Mini' },
+    { id: 'gpt-4o', name: 'GPT-4o' },
+    { id: 'gpt-5', name: 'GPT-5' },
 ];
 
 const signalPreviewUpdate = (projectId: string) => {
@@ -227,7 +228,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<AiModel>('google/gemini-2.0-flash-lite-001');
+  const [selectedModel, setSelectedModel] = useState<AiModel>('gpt-4o-mini');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const projectRef = useRef<Project | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
