@@ -185,3 +185,7 @@ export const AlertTriangleIcon: React.FC<{className?: string}> = ({className}) =
 export const InfoIcon: React.FC<{className?: string}> = ({className}) => (
     <svg {...iconProps} className={className || iconProps.className}><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
 );
+
+export const GripVerticalIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg {...iconProps} className={className || iconProps.className} fill="currentColor"><circle cx="12" cy="5" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="12" cy="19" r="1" /></svg>
+);

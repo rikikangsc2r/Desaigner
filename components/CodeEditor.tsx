@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo, useEffect } from 'react';
 import { SaveIcon, MaximizeIcon, MinimizeIcon } from './Icons';
 
 interface CodeEditorProps {
@@ -13,6 +13,24 @@ interface CodeEditorProps {
 
 const CodeEditor: React.FC<CodeEditorProps> = ({ filePath, content, onChange, onSave, isDirty, isFullScreen, onToggleFullScreen }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const lineNumbersRef = useRef<HTMLDivElement>(null);
+
+    const lines = useMemo(() => content.split('\n'), [content]);
+
+    const syncScroll = () => {
+        if (lineNumbersRef.current && textareaRef.current) {
+            lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop;
+        }
+    };
+    
+    useEffect(() => {
+        const ta = textareaRef.current;
+        if (ta) {
+            ta.addEventListener('scroll', syncScroll);
+            return () => ta.removeEventListener('scroll', syncScroll);
+        }
+    }, []);
+
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Handle Tab key
@@ -65,13 +83,18 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ filePath, content, onChange, on
                     </button>
                 </div>
             </div>
-            <div className="flex-1 relative bg-[#282c34]">
+            <div className="flex-1 relative bg-[#282c34] flex overflow-hidden">
+                <div ref={lineNumbersRef} className="text-right p-4 font-mono text-sm text-slate-500 bg-[#21252b] select-none overflow-y-hidden" aria-hidden="true">
+                    {lines.map((_, i) => (
+                        <div key={i} className="leading-relaxed h-[21px]">{i + 1}</div>
+                    ))}
+                </div>
                 <textarea
                     ref={textareaRef}
                     value={content}
                     onChange={(e) => onChange(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    className="absolute inset-0 w-full h-full bg-transparent text-slate-200 caret-white font-mono text-sm p-4 border-none focus:outline-none focus:ring-0 resize-none leading-relaxed tracking-wide whitespace-pre"
+                    className="flex-1 h-full bg-transparent text-slate-200 caret-white font-mono text-sm p-4 border-none focus:outline-none focus:ring-0 resize-none leading-relaxed tracking-wide whitespace-pre"
                     spellCheck="false"
                     autoCapitalize="off"
                     autoComplete="off"
