@@ -1,14 +1,17 @@
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
 import { getProject, saveProject } from '../services/projectService';
-import { runAIAgentWorkflow, AIConversationalError } from '../services/aiService';
+import { streamAIAgentResponse } from '../services/aiService';
 import { createProjectZip, createPreviewHtml } from '../utils/fileUtils';
-import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon, GripVerticalIcon, MenuIcon, LogOutIcon } from './Icons';
+import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon, MenuIcon, LogOutIcon, XIcon } from './Icons';
 import { TypingIndicator } from './Loader';
 import FileTree from './FileTree';
 import CodeEditor from './CodeEditor';
 import ShareModal from './ShareModal';
 import { useAuth } from '../auth';
+
+declare const puter: any;
 
 interface ProjectEditorProps {
   projectId: string;
@@ -21,11 +24,18 @@ type ToastType = { id: number; message: string; type: 'success' | 'error' | 'inf
 
 type AiModel = string;
 const aiModels: { id: AiModel, name: string }[] = [
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
     { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
     { id: 'o1-mini', name: 'O1 Mini' },
+    { id: 'claude-sonnet-4', name: 'Claude Sonnet 4' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'grok', name: 'Grok' },
+    { id: 'mistral-large', name: 'Mistral Large' },
+    { id: 'llama3-70b', name: 'Llama3 70B' },
     { id: 'gpt-4o', name: 'GPT-4o' },
     { id: 'gpt-5', name: 'GPT-5' },
+    { id: 'claude-opus-4', name: 'Claude Opus 4' },
+    { id: 'deepseek-coder', name: 'DeepSeek Coder' },
 ];
 
 const signalPreviewUpdate = (projectId: string) => {
@@ -36,19 +46,19 @@ const signalPreviewUpdate = (projectId: string) => {
 const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): ProjectFile[] => {
   let updatedFiles = [...currentFiles];
   const { operation: opType, path, content = '' } = operation;
-  const fileExists = updatedFiles.some(f => f.path === path);
+  const fileIndex = updatedFiles.findIndex(f => f.path === path);
 
   switch (opType) {
     case 'CREATE':
-      if (fileExists) updatedFiles = updatedFiles.map(f => f.path === path ? { ...f, content } : f);
+      if (fileIndex > -1) updatedFiles[fileIndex] = { ...updatedFiles[fileIndex], content };
       else updatedFiles.push({ path, content });
       break;
     case 'UPDATE':
-       if (!fileExists) updatedFiles.push({ path, content });
-       else updatedFiles = updatedFiles.map(f => f.path === path ? { ...f, content } : f);
+       if (fileIndex === -1) updatedFiles.push({ path, content });
+       else updatedFiles[fileIndex] = { ...updatedFiles[fileIndex], content };
       break;
     case 'DELETE':
-      updatedFiles = updatedFiles.filter(f => f.path !== path);
+      if (fileIndex > -1) updatedFiles.splice(fileIndex, 1);
       break;
     default:
       console.warn(`Unknown operation type: ${opType}`);
@@ -57,7 +67,7 @@ const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): 
 };
 
 const CollapsibleSection: React.FC<{ title: string; children: React.ReactNode, icon: React.ReactNode }> = ({ title, icon, children }) => (
-    <details className="mt-3 border-t border-slate-600/50 pt-3 group">
+    <details className="mt-3 border-t border-slate-600/50 pt-3 group" open>
         <summary className="list-none flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-400 hover:text-slate-200 transition-colors">
             {icon} {title}
             <span className="ml-auto text-slate-500 group-open:rotate-90 transition-transform">&#9656;</span>
@@ -73,7 +83,7 @@ const ThinkingLog: React.FC<{ thoughts: string[], isThinking: boolean }> = ({ th
     const icon = isThinking ? <SpinnerIcon className="w-4 h-4" /> : <InfoIcon className="w-4 h-4" />;
     
     return (
-        <CollapsibleSection title="Thought Process" icon={icon}>
+        <CollapsibleSection title="Rencana" icon={icon}>
             <ul className="space-y-1.5 text-sm text-slate-400 pl-4">
                 {thoughts.map((thought, index) => (
                     <li key={index} className="break-words relative pl-4 before:content-['▸'] before:absolute before:left-0 before:top-0 before:text-indigo-400">
@@ -96,7 +106,7 @@ const FileOperationsSummary: React.FC<{ operations: FileOperation[] }> = ({ oper
         }
     };
     return (
-        <CollapsibleSection title="File Actions" icon={<CodeIcon className="w-4 h-4" />}>
+        <CollapsibleSection title="Perubahan File" icon={<CodeIcon className="w-4 h-4" />}>
             <ul className="space-y-1.5">
                 {operations.map((op, index) => (
                     <li key={index} className="flex items-center gap-3 text-sm">
@@ -113,9 +123,9 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
     const chatEndRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatHistory]);
+    }, [chatHistory, isLoading]);
 
-    const filteredHistory = chatHistory.filter(msg => msg.role !== 'system' && msg.role !== 'tool');
+    const filteredHistory = chatHistory.filter(msg => msg.role !== 'system');
 
     return (
         <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
@@ -133,7 +143,7 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
                         <div className={`max-w-[85%] md:max-w-[80%] p-3 ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-t-xl rounded-bl-xl' : 'bg-slate-700 text-slate-200 rounded-t-xl rounded-br-xl'}`}>
                             {msg.content ? (
                               <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 py-0.5 font-mono text-sm">$1</code>') }}></p>
-                            ) : <TypingIndicator />}
+                            ) : isLoading && isLastMessage ? <TypingIndicator /> : null}
                             <ThinkingLog thoughts={msg.thoughts || []} isThinking={isThinking} />
                             <FileOperationsSummary operations={msg.operations || []} />
                         </div>
@@ -149,6 +159,75 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
         </div>
     );
 }
+
+const ModelSelector: React.FC<{
+    selectedModel: AiModel;
+    setSelectedModel: (model: AiModel) => void;
+    isLoading: boolean;
+    isMobile?: boolean;
+}> = ({ selectedModel, setSelectedModel, isLoading, isMobile }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [search, setSearch] = useState('');
+    const wrapperRef = useRef<HTMLDivElement>(null);
+
+    const filteredModels = useMemo(() => 
+        aiModels.filter(m => m.name.toLowerCase().includes(search.toLowerCase())),
+        [search]
+    );
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const selectedModelName = aiModels.find(m => m.id === selectedModel)?.name || 'Select Model';
+
+    return (
+        <div className="relative" ref={wrapperRef}>
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                disabled={isLoading}
+                className="flex-1 w-full bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-xs text-left focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60 flex justify-between items-center"
+            >
+                <span className="truncate">{selectedModelName}</span>
+                <span className="text-slate-400 transform transition-transform">&#9662;</span>
+            </button>
+            {isOpen && (
+                <div className="absolute bottom-full mb-2 w-full max-w-xs bg-slate-800 border border-slate-600 rounded-lg shadow-2xl z-20 p-2">
+                    <input
+                        type="text"
+                        placeholder="Search models..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="w-full bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-xs mb-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <ul className="max-h-48 overflow-y-auto">
+                        {filteredModels.map(model => (
+                            <li key={model.id}>
+                                <button
+                                    onClick={() => {
+                                        setSelectedModel(model.id);
+                                        setIsOpen(false);
+                                        setSearch('');
+                                    }}
+                                    className={`w-full text-left text-xs px-2 py-1.5 rounded-md ${selectedModel === model.id ? 'bg-indigo-600' : 'hover:bg-slate-700'}`}
+                                >
+                                    {model.name}
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 interface ChatInputProps {
   isMobile?: boolean;
@@ -173,13 +252,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
 }) => (
    <div className={`flex flex-col gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl ${isMobile ? 'bg-slate-800/95 backdrop-blur-sm !rounded-none !border-none !border-t !border-slate-700' : ''}`}>
       <div className="flex items-center gap-2 px-1">
-          <label htmlFor={`ai-model-selector-${isMobile ? 'mobile' : 'desktop'}`} className="text-xs font-medium text-slate-400">Model:</label>
-          <select id={`ai-model-selector-${isMobile ? 'mobile' : 'desktop'}`} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={isLoading} className="flex-1 bg-slate-700 border border-slate-600 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60">
-              {aiModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-          </select>
+          <label className="text-xs font-medium text-slate-400">Model:</label>
+          <ModelSelector selectedModel={selectedModel} setSelectedModel={setSelectedModel} isLoading={isLoading} isMobile={isMobile} />
       </div>
       <div className="flex gap-2">
-          <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="Describe your changes..." className="flex-1 bg-slate-700/50 border border-slate-600 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows={isMobile ? 1 : 2} disabled={isLoading} />
+          <textarea value={userInput} onChange={(e) => setUserInput(e.target.value)} placeholder="Describe your changes..." className="flex-1 bg-slate-700/50 border border-slate-600 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows={isMobile ? 1 : 2} disabled={isLoading} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} />
           <div className={`flex gap-2 ${isMobile ? 'flex-col-reverse' : 'flex-col'}`}>
               <button onClick={handleSendMessage} disabled={isLoading || !userInput.trim()} className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center" aria-label="Send message"><SendIcon className="w-5 h-5" /></button>
               {!isMobile && <button onClick={handleNewChat} disabled={isLoading} className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center" aria-label="Start new chat" title="New Chat"><RefreshIcon className="w-5 h-5" /></button>}
@@ -229,13 +306,10 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishedUrl, setPublishedUrl] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<AiModel>('gpt-4o-mini');
+  const [selectedModel, setSelectedModel] = useState<AiModel>('gpt-5-nano');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const projectRef = useRef<Project | null>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const { user, isSignedIn, isLoading: isAuthLoading, signOut } = useAuth();
-
-  useEffect(() => { projectRef.current = project; }, [project]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -296,66 +370,84 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
     showToast(`${selectedFilePath} saved successfully!`, 'success');
     if (signal) signalPreviewUpdate(project.id);
   }, [project, selectedFilePath, editorContent, isEditorDirty, showToast]);
-
+  
   const handleSendMessage = useCallback(async () => {
-    if (!userInput.trim() || !project) return;
-    if (isEditorDirty && confirm('Anda punya perubahan belum disimpan. Simpan sebelum mengirim pesan?')) await handleSaveFile({ signal: false });
+      if (!userInput.trim() || !project) return;
+      if (isEditorDirty && confirm('Anda punya perubahan belum disimpan. Simpan sebelum mengirim pesan?')) await handleSaveFile({ signal: false });
 
-    const userGoal = userInput;
-    setIsLoading(true);
-    setError(null);
-    setUserInput('');
-    const userMessage: ChatMessage = { role: 'user', content: userGoal };
-    const assistantPlaceholder: ChatMessage = { role: 'assistant', content: null, thoughts: [], operations: [] };
-    const projectForUserMsg = { ...projectRef.current!, chatHistory: [...projectRef.current!.chatHistory, userMessage, assistantPlaceholder] };
-    setProject(projectForUserMsg);
-    projectRef.current = projectForUserMsg;
+      const userGoal = userInput;
+      setIsLoading(true);
+      setError(null);
+      setUserInput('');
 
-    const onThought = (thought: string) => setProject(p => {
-        if (!p) return null;
-        const history = [...p.chatHistory];
-        const lastMsg = history[history.length - 1];
-        if (lastMsg?.role === 'assistant') lastMsg.thoughts = [...(lastMsg.thoughts || []), thought];
-        const newProj = { ...p, chatHistory: history };
-        projectRef.current = newProj;
-        return newProj;
-      });
+      const userMessage: ChatMessage = { role: 'user', content: userGoal };
+      const assistantPlaceholder: ChatMessage = { role: 'assistant', content: null, thoughts: [], operations: [] };
 
-    try {
-      const projectForAI = projectRef.current!;
-      const result = await runAIAgentWorkflow(userGoal, projectForAI.files, projectForAI.template, projectForAI.styleLibrary, selectedModel, onThought);
+      // Use a ref to get the latest project state for the stream
+      const projectAtRequestTime = { ...project, chatHistory: [...project.chatHistory, userMessage, assistantPlaceholder] };
+      setProject(projectAtRequestTime);
 
-      let updatedFiles = projectForAI.files;
-      for (const op of result.operations) updatedFiles = applyOperation(updatedFiles, op);
+      let tempFiles = projectAtRequestTime.files;
+      let finalExplanation = '';
+      const finalThoughts: string[] = [];
+      const finalOperations: FileOperation[] = [];
 
-      const fileChanged = result.operations.find(op => op.path === selectedFilePath);
-      if (fileChanged) {
-        if (fileChanged.operation === 'DELETE') { setSelectedFilePath(null); setEditorContent(''); } 
-        else { setEditorContent(fileChanged.content ?? ''); }
-        setIsEditorDirty(false);
+      try {
+          const stream = streamAIAgentResponse(userGoal, tempFiles, projectAtRequestTime.template, projectAtRequestTime.styleLibrary, selectedModel);
+
+          for await (const chunk of stream) {
+              if (chunk.type === 'thought') {
+                  finalThoughts.push(chunk.content);
+                  setProject(p => p ? { ...p, chatHistory: p.chatHistory.map((msg, i) => i === p.chatHistory.length - 1 ? { ...msg, thoughts: [...(msg.thoughts || []), chunk.content] } : msg) } : null);
+              } else if (chunk.type === 'explanation') {
+                  finalExplanation += chunk.content;
+                  setProject(p => p ? { ...p, chatHistory: p.chatHistory.map((msg, i) => i === p.chatHistory.length - 1 ? { ...msg, content: finalExplanation } : msg) } : null);
+              } else if (chunk.type === 'file' && chunk.path) {
+                  const isExisting = tempFiles.some(f => f.path === chunk.path);
+                  const operation: FileOperation = {
+                      operation: chunk.content === 'DELETE' ? 'DELETE' : (isExisting ? 'UPDATE' : 'CREATE'),
+                      path: chunk.path,
+                      content: chunk.content === 'DELETE' ? '' : chunk.content,
+                  };
+                  finalOperations.push(operation);
+                  tempFiles = applyOperation(tempFiles, operation);
+
+                  setProject(p => p ? { ...p, files: tempFiles } : null);
+
+                  if (chunk.path === selectedFilePath) {
+                      if (chunk.content === 'DELETE') {
+                          setSelectedFilePath(null); setEditorContent('');
+                      } else { setEditorContent(chunk.content); }
+                      setIsEditorDirty(false);
+                  }
+              } else if (chunk.type === 'error') {
+                  throw new Error(chunk.content);
+              }
+          }
+          
+          const finalHistory: ChatMessage[] = [
+              ...projectAtRequestTime.chatHistory.slice(0, -1),
+              { role: 'assistant', content: finalExplanation, operations: finalOperations, thoughts: finalThoughts }
+          ];
+
+          const updatedProject = { ...projectAtRequestTime, files: tempFiles, chatHistory: finalHistory, updatedAt: Date.now() };
+          setProject(updatedProject);
+          await saveProject(updatedProject);
+          signalPreviewUpdate(updatedProject.id);
+
+      } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'An unknown AI error occurred.';
+          showToast(`AI task failed: ${errorMessage}`, 'error');
+          setProject(p => {
+              if (!p) return null;
+              const history = [...p.chatHistory];
+              const lastMsg = history[history.length - 1];
+              if (lastMsg?.role === 'assistant') lastMsg.content = `Sorry, an error occurred: ${errorMessage}`;
+              return { ...p, chatHistory: history };
+          });
+      } finally {
+          setIsLoading(false);
       }
-      
-      const finalHistory = [...projectForAI.chatHistory.slice(0, -1), { role: 'assistant' as const, content: result.explanation, operations: result.operations, thoughts: projectRef.current!.chatHistory[projectRef.current!.chatHistory.length - 1].thoughts || [] }];
-      const updatedProject = { ...projectForAI, files: updatedFiles, chatHistory: finalHistory, updatedAt: Date.now() };
-      setProject(updatedProject);
-      projectRef.current = updatedProject;
-      await saveProject(updatedProject);
-      signalPreviewUpdate(updatedProject.id);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unknown AI error occurred.';
-      showToast(`AI task failed: ${errorMessage}`, 'error');
-      setProject(p => {
-        if (!p) return null;
-        const history = [...p.chatHistory];
-        const lastMsg = history[history.length - 1];
-        if (lastMsg?.role === 'assistant') lastMsg.content = `Sorry, an error occurred: ${errorMessage}`;
-        const newProj = { ...p, chatHistory: history };
-        projectRef.current = newProj;
-        return newProj;
-      });
-    } finally {
-      setIsLoading(false);
-    }
   }, [project, userInput, isEditorDirty, selectedFilePath, selectedModel, handleSaveFile, showToast]);
 
   const handleNewChat = useCallback(async () => {
@@ -368,22 +460,47 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const handlePreview = () => window.open(`/#/preview/${project.id}`, '_blank');
   
   const handlePublish = useCallback(async () => {
-    if (!project || isPublishing) return;
+    if (!project || isPublishing || !puter.hosting) return;
     setIsPublishing(true);
+    showToast('Publishing project...', 'info');
+
+    const sanitizedProjectName = project.name.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase();
+    const hostingDir = `~/Websites/${sanitizedProjectName}`;
+
     try {
-        const previewHtml = createPreviewHtml(project.files);
-        const payload = { files: project.files, previewHtml: previewHtml, template: project.template, styleLibrary: project.styleLibrary, name: project.name };
-        const res = await fetch('https://jsonblob.com/api/jsonBlob', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(payload) });
-        if (!res.ok) throw new Error(`JSONBlob API error (${res.status})`);
-        const blobUrl = res.headers.get('Location');
-        if (!blobUrl) throw new Error('Could not get blob URL from response.');
-        const blobId = blobUrl.split('/').pop();
-        if (!blobId) throw new Error('Could not parse blob ID.');
-        setPublishedUrl(`${window.location.origin}${window.location.pathname}#/view/jsonblob/${blobId}`);
+        await puter.fs.mkdir(hostingDir, { createMissingParents: true });
+
+        for (const file of project.files) {
+            await puter.fs.write(`${hostingDir}/${file.path}`, file.content, { createMissingParents: true });
+        }
+
+        let subdomain = project.publishedSubdomain;
+
+        if (subdomain) {
+            showToast('Website updated successfully!', 'success');
+        } else {
+            subdomain = puter.randName();
+            await puter.hosting.create(subdomain, hostingDir);
+            
+            const updatedProject = { ...project, publishedSubdomain: subdomain, updatedAt: Date.now() };
+            setProject(updatedProject);
+            await saveProject(updatedProject);
+            showToast('Website published successfully!', 'success');
+        }
+        
+        const url = `https://${subdomain}.puter.site`;
+        setPublishedUrl(url);
         setIsShareModalOpen(true);
-    } catch (e) { showToast(`Failed to publish: ${e instanceof Error ? e.message : 'Unknown error.'}`, 'error');
-    } finally { setIsPublishing(false); }
+
+    } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : 'Unknown error.';
+        showToast(`Publishing failed: ${errorMessage}`, 'error');
+        console.error("Publishing error:", e);
+    } finally {
+        setIsPublishing(false);
+    }
   }, [project, isPublishing, showToast]);
+
 
   const handleDownload = async () => {
     if (!project || project.files.length === 0) { showToast('No files to download.', 'error'); return; }
@@ -440,7 +557,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                 <div className="w-px h-6 bg-slate-600" />
               </div>
             ) : null}
-            <button onClick={handlePublish} disabled={isPublishing} title="Publish Website" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors disabled:bg-slate-600 disabled:cursor-wait">{isPublishing ? <SpinnerIcon /> : <CloudUploadIcon />}</button>
+            <button onClick={handlePublish} disabled={isPublishing} title="Publish Website" className="hidden lg:flex items-center gap-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors disabled:bg-slate-600 disabled:cursor-wait px-3 py-2 text-sm font-semibold">{isPublishing ? <><SpinnerIcon className="w-4 h-4" /> Publishing...</> : <><CloudUploadIcon className="w-4 h-4"/> Publish</>}</button>
             <button onClick={handlePreview} title="Preview Website" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors"><EyeIcon /></button>
             <button onClick={handleDownload} title="Download Project" className="hidden lg:flex p-2 bg-slate-700 hover:bg-indigo-600 rounded-lg text-slate-300 hover:text-white transition-colors"><DownloadIcon /></button>
             
@@ -451,7 +568,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                 {isMobileMenuOpen && (
                     <div className="absolute top-full right-0 mt-2 w-56 bg-slate-800 border border-slate-700 rounded-md shadow-lg z-50 py-1 transition-opacity duration-200">
                         <button onClick={() => { handlePublish(); setIsMobileMenuOpen(false); }} disabled={isPublishing} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700 disabled:opacity-50">
-                            {isPublishing ? <SpinnerIcon /> : <CloudUploadIcon />} Publish Website
+                            {isPublishing ? <SpinnerIcon className="w-4 h-4" /> : <CloudUploadIcon />} {isPublishing ? 'Publishing...' : 'Publish Website'}
                         </button>
                         <button onClick={() => { handlePreview(); setIsMobileMenuOpen(false); }} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700">
                             <EyeIcon /> Preview Website

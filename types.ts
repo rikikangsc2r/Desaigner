@@ -16,22 +16,14 @@ export interface Project {
   currentSessionId: string;
   template: TemplateType;
   styleLibrary: StyleLibrary;
+  publishedSubdomain?: string;
 }
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system';
   content: string | null;
   operations?: FileOperation[];
   thoughts?: string[];
-  tool_calls?: {
-    id: string;
-    type: 'function';
-    function: {
-      name: string;
-      arguments: string;
-    };
-  }[];
-  tool_call_id?: string;
 }
 
 export type FileOperationType = 'CREATE' | 'UPDATE' | 'DELETE';

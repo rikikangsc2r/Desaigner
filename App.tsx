@@ -2,13 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ProjectList from './components/ProjectList';
 import ProjectEditor from './components/ProjectEditor';
 import ProjectPreview from './components/ProjectPreview';
-import JsonBlobViewer from './components/JsonBlobViewer';
 
 type AppRoute = 
   | { name: 'list' }
   | { name: 'editor', projectId: string }
-  | { name: 'preview', projectId: string }
-  | { name: 'view-jsonblob', blobId: string };
+  | { name: 'preview', projectId: string };
 
 const App: React.FC = () => {
   const [route, setRoute] = useState<AppRoute>({ name: 'list' });
@@ -22,8 +20,6 @@ const App: React.FC = () => {
         setRoute({ name: 'editor', projectId: parts[1] });
       } else if (parts[0] === 'preview' && parts[1]) {
         setRoute({ name: 'preview', projectId: parts[1] });
-      } else if (parts[0] === 'view' && parts[1] === 'jsonblob' && parts[2]) {
-        setRoute({ name: 'view-jsonblob', blobId: parts[2] });
       } else {
         setRoute({ name: 'list' });
       }
@@ -49,8 +45,6 @@ const App: React.FC = () => {
     switch(route.name) {
       case 'preview':
         return <ProjectPreview projectId={route.projectId} />;
-      case 'view-jsonblob':
-        return <JsonBlobViewer blobId={route.blobId} />;
       case 'editor':
         return <ProjectEditor projectId={route.projectId} onBack={handleBackToList} />;
       case 'list':

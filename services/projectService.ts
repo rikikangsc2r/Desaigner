@@ -1,120 +1,131 @@
-import type { Project } from '../types';
+import type { Project, ProjectFile } from '../types';
 
-const DB_NAME = 'AIWebBuilderDB';
-const DB_VERSION = 1;
-const STORE_NAME = 'projects';
+declare const puter: any;
 
-let dbPromise: Promise<IDBDatabase> | null = null;
+const BASE_PATH = '~/AppData/Autonomous AI Web Builder';
 
-const openDB = (): Promise<IDBDatabase> => {
-    if (dbPromise) {
-        return dbPromise;
+// Ensure the base directory exists
+const ensureBaseDir = async () => {
+    try {
+        await puter.fs.stat(BASE_PATH);
+    } catch (e) {
+        // If it doesn't exist, create it
+        await puter.fs.mkdir(BASE_PATH, { createMissingParents: true });
     }
-
-    dbPromise = new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-        request.onupgradeneeded = (event) => {
-            const db = (event.target as IDBOpenDBRequest).result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-            }
-        };
-
-        request.onsuccess = (event) => {
-            resolve((event.target as IDBOpenDBRequest).result);
-        };
-
-        request.onerror = (event) => {
-            console.error('Database error:', (event.target as IDBOpenDBRequest).error);
-            dbPromise = null; // Allow retry on next call
-            reject('Error opening database');
-        };
-    });
-
-    return dbPromise;
 };
 
+const getProjectPath = (id: string) => `${BASE_PATH}/${id}`;
+const getProjectMetaPath = (id: string) => `${getProjectPath(id)}/project.json`;
+const getProjectFilesPath = (id: string) => `${getProjectPath(id)}/src`;
+
 /**
- * Fetches all projects from IndexedDB.
+ * Fetches all projects from Puter FS.
  */
 export const getProjects = async (): Promise<Project[]> => {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(STORE_NAME, 'readonly');
-        const store = transaction.objectStore(STORE_NAME);
-        const request = store.getAll();
+    await ensureBaseDir();
+    const projectDirs = await puter.fs.readdir(BASE_PATH);
+    const projects: Project[] = [];
 
-        request.onsuccess = () => {
-            resolve(request.result);
-        };
-
-        request.onerror = () => {
-            console.error('Error fetching projects:', request.error);
-            reject('Error fetching projects');
-        };
-    });
+    for (const dir of projectDirs) {
+        if (dir.is_dir) {
+            try {
+                const metaPath = getProjectMetaPath(dir.name);
+                const metaBlob = await puter.fs.read(metaPath);
+                const metaContent = await metaBlob.text();
+                const projectMeta = JSON.parse(metaContent);
+                projects.push(projectMeta);
+            } catch (e) {
+                console.error(`Could not read project metadata for ${dir.name}:`, e);
+            }
+        }
+    }
+    return projects;
 };
 
 /**
- * Fetches a single project by its ID from IndexedDB.
+ * Fetches a single project by its ID from Puter FS.
  */
 export const getProject = async (id: string): Promise<Project | null> => {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(STORE_NAME, 'readonly');
-        const store = transaction.objectStore(STORE_NAME);
-        const request = store.get(id);
+    await ensureBaseDir();
+    try {
+        const metaPath = getProjectMetaPath(id);
+        const metaBlob = await puter.fs.read(metaPath);
+        const project = JSON.parse(await metaBlob.text());
 
-        request.onsuccess = () => {
-            resolve(request.result || null);
-        };
+        const filesPath = getProjectFilesPath(id);
+        const projectFiles: ProjectFile[] = [];
 
-        request.onerror = () => {
-            console.error('Error fetching project:', request.error);
-            reject('Error fetching project');
-        };
-    });
+        const readDirRecursive = async (currentPath: string) => {
+            try {
+                const items = await puter.fs.readdir(currentPath);
+                for (const item of items) {
+                    if (item.is_dir) {
+                        await readDirRecursive(item.path);
+                    } else {
+                        const fileBlob = await puter.fs.read(item.path);
+                        const content = await fileBlob.text();
+                        const relativePath = item.path.substring(filesPath.length + 1);
+                        projectFiles.push({ path: relativePath, content });
+                    }
+                }
+            } catch(e) {
+                if (e.message.includes('No such file or directory')) {
+                     console.log(`Directory not found, skipping: ${currentPath}`);
+                } else {
+                    throw e;
+                }
+            }
+        }
+        
+        await readDirRecursive(filesPath);
+        project.files = projectFiles;
+        return project;
+
+    } catch (e) {
+        console.error(`Error fetching project ${id}:`, e);
+        return null;
+    }
 };
 
 /**
- * Saves a new project or updates an existing one in IndexedDB.
+ * Saves a new project or updates an existing one in Puter FS.
  */
 export const saveProject = async (project: Project): Promise<void> => {
-    const db = await openDB();
-    return new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction(STORE_NAME, 'readwrite');
-        const store = transaction.objectStore(STORE_NAME);
-        store.put(project);
+    await ensureBaseDir();
+    const filesPath = getProjectFilesPath(project.id);
 
-        transaction.oncomplete = () => {
-            resolve();
-        };
+    // Separate files from the rest of the project metadata to store in project.json
+    const { files, ...meta } = project;
+    
+    // Write metadata
+    const metaPath = getProjectMetaPath(project.id);
+    await puter.fs.write(metaPath, JSON.stringify(meta, null, 2), { createMissingParents: true });
+    
+    // Clean the src directory before writing new files to ensure perfect sync
+    try {
+        await puter.fs.delete(filesPath, { recursive: true });
+    } catch(e) {
+        // It's okay if it doesn't exist
+    }
+    await puter.fs.mkdir(filesPath, { createMissingParents: true });
 
-        transaction.onerror = () => {
-            console.error('Error saving project:', transaction.error);
-            reject('Error saving project');
-        };
-    });
+    // Write all project files
+    for (const file of files) {
+        const filePath = `${filesPath}/${file.path}`;
+        await puter.fs.write(filePath, file.content, { createMissingParents: true });
+    }
 };
 
 /**
- * Deletes a project by its ID from IndexedDB.
+ * Deletes a project by its ID from Puter FS.
  */
 export const deleteProject = async (id: string): Promise<void> => {
-    const db = await openDB();
-    return new Promise<void>((resolve, reject) => {
-        const transaction = db.transaction(STORE_NAME, 'readwrite');
-        const store = transaction.objectStore(STORE_NAME);
-        store.delete(id);
-
-        transaction.oncomplete = () => {
-            resolve();
-        };
-
-        transaction.onerror = () => {
-            console.error('Error deleting project:', transaction.error);
-            reject('Error deleting project');
-        };
-    });
+    await ensureBaseDir();
+    const projectPath = getProjectPath(id);
+    try {
+        await puter.fs.delete(projectPath, { recursive: true });
+    } catch (e) {
+        console.error(`Failed to delete project ${id}:`, e);
+        throw new Error(`Failed to delete project: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
 };

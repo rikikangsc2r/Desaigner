@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Project, ProjectFile, StyleLibrary, TemplateType } from '../types';
 import { saveProject } from '../services/projectService';
@@ -31,24 +32,20 @@ const JsonBlobViewer: React.FC<JsonBlobViewerProps> = ({ blobId }) => {
                 return res.json();
             })
             .then(data => {
-                // New format check (with full project structure)
                 if (data && data.previewHtml && Array.isArray(data.files)) {
                     setHtmlContent(data.previewHtml);
                     setForkableProjectData({
                         files: data.files,
-                        // FIX: The 'vanilla' template type is deprecated. Default to 'blank'.
-                        template: data.template || 'blank',
+                        template: data.template === 'vanilla' ? 'blank' : data.template || 'blank',
                         styleLibrary: data.styleLibrary || 'none',
                         name: data.name || `Fork of ${blobId.substring(0,8)}`
                     });
                 } 
-                // Old format check for backward compatibility
                 else if (data && data.html && typeof data.html === 'string') {
                     setHtmlContent(data.html);
                     setForkableProjectData({
                         files: [{ path: 'index.html', content: data.html }],
-                        // FIX: The 'html' template type is deprecated and invalid. Use 'blank' for backward compatibility.
-                        template: 'blank',
+                        template: 'blank', // Legacy 'html' type maps to 'blank'
                         styleLibrary: 'none',
                         name: `Fork of ${blobId.substring(0,8)}`
                     });
