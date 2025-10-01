@@ -58,20 +58,22 @@ const applyOperation = (currentFiles: ProjectFile[], operation: FileOperation): 
 
 const CollapsibleSection: React.FC<{ title: string; children: React.ReactNode, icon: React.ReactNode }> = ({ title, icon, children }) => (
     <details className="mt-3 border-t border-slate-600/50 pt-3 group">
-        <summary className="list-none flex items-center gap-2 cursor-pointer text-sm text-slate-400 hover:text-slate-200 transition-colors">
+        <summary className="list-none flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-400 hover:text-slate-200 transition-colors">
             {icon} {title}
-            <span className="text-slate-500 group-open:rotate-90 transition-transform">&#9656;</span>
+            <span className="ml-auto text-slate-500 group-open:rotate-90 transition-transform">&#9656;</span>
         </summary>
-        <div className="pt-2 pl-2">
+        <div className="mt-2 p-3 rounded-md bg-slate-900/50 border border-slate-600/50">
             {children}
         </div>
     </details>
 );
 
-const ThinkingLog: React.FC<{ thoughts: string[] }> = ({ thoughts }) => {
+const ThinkingLog: React.FC<{ thoughts: string[], isThinking: boolean }> = ({ thoughts, isThinking }) => {
     if (!thoughts || thoughts.length === 0) return null;
+    const icon = isThinking ? <SpinnerIcon className="w-4 h-4" /> : <InfoIcon className="w-4 h-4" />;
+    
     return (
-        <CollapsibleSection title="Thought Process" icon={<SpinnerIcon className="w-4 h-4" />}>
+        <CollapsibleSection title="Thought Process" icon={icon}>
             <ul className="space-y-1.5 text-sm text-slate-400 pl-4">
                 {thoughts.map((thought, index) => (
                     <li key={index} className="break-words relative pl-4 before:content-['▸'] before:absolute before:left-0 before:top-0 before:text-indigo-400">
@@ -107,35 +109,42 @@ const FileOperationsSummary: React.FC<{ operations: FileOperation[] }> = ({ oper
     );
 };
 
-const ChatWindow: React.FC<{ chatHistory: ChatMessage[] }> = ({ chatHistory }) => {
+const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> = ({ chatHistory, isLoading }) => {
     const chatEndRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatHistory]);
 
+    const filteredHistory = chatHistory.filter(msg => msg.role !== 'system' && msg.role !== 'tool');
+
     return (
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
-            {chatHistory.filter(msg => msg.role !== 'system' && msg.role !== 'tool').map((msg, index) => (
-                <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                    {msg.role === 'assistant' && (
-                       <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30">
-                         <BotIcon className="w-5 h-5 text-indigo-100" />
-                       </div>
-                    )}
-                    <div className={`max-w-[85%] p-3 ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-t-xl rounded-bl-xl' : 'bg-slate-700 text-slate-200 rounded-t-xl rounded-br-xl'}`}>
-                        {msg.content ? (
-                          <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 py-0.5 font-mono text-sm">$1</code>') }}></p>
-                        ) : <TypingIndicator />}
-                        <ThinkingLog thoughts={msg.thoughts || []} />
-                        <FileOperationsSummary operations={msg.operations || []} />
+        <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
+            {filteredHistory.map((msg, index) => {
+                const isLastMessage = index === filteredHistory.length - 1;
+                const isThinking = isLastMessage && isLoading && msg.role === 'assistant';
+
+                return (
+                    <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+                        {msg.role === 'assistant' && (
+                           <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30">
+                             <BotIcon className="w-5 h-5 text-indigo-100" />
+                           </div>
+                        )}
+                        <div className={`max-w-[85%] md:max-w-[80%] p-3 ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-t-xl rounded-bl-xl' : 'bg-slate-700 text-slate-200 rounded-t-xl rounded-br-xl'}`}>
+                            {msg.content ? (
+                              <p className="whitespace-pre-wrap break-words" dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br />').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 py-0.5 font-mono text-sm">$1</code>') }}></p>
+                            ) : <TypingIndicator />}
+                            <ThinkingLog thoughts={msg.thoughts || []} isThinking={isThinking} />
+                            <FileOperationsSummary operations={msg.operations || []} />
+                        </div>
+                        {msg.role === 'user' && (
+                          <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0 mt-1">
+                            <UserIcon className="w-5 h-5 text-slate-300" />
+                          </div>
+                        )}
                     </div>
-                    {msg.role === 'user' && (
-                      <div className="w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center flex-shrink-0 mt-1">
-                        <UserIcon className="w-5 h-5 text-slate-300" />
-                      </div>
-                    )}
-                </div>
-            ))}
+                )
+            })}
             <div ref={chatEndRef} />
         </div>
     );
@@ -372,7 +381,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                       selectedFilePath ? <CodeEditor filePath={selectedFilePath} content={editorContent} onChange={handleEditorChange} onSave={handleSaveFile} isDirty={isEditorDirty} isFullScreen={isEditorFullscreen} onToggleFullScreen={() => setIsEditorFullscreen(p => !p)} /> 
                       : <div className="flex h-full justify-center items-center bg-slate-800/50 border border-slate-700 rounded-xl"><p className="text-slate-400">Pilih file untuk diedit</p></div>
                     ) : (
-                      <ChatWindow chatHistory={project.chatHistory} />
+                      <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
                     )}
                 </div>
                 <div className="flex-shrink-0 pt-4">
@@ -430,7 +439,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                     {mainView === 'editor' ? (
                         selectedFilePath ? <CodeEditor filePath={selectedFilePath} content={editorContent} onChange={handleEditorChange} onSave={handleSaveFile} isDirty={isEditorDirty} isFullScreen={isEditorFullscreen} onToggleFullScreen={() => setIsEditorFullscreen(p => !p)} /> 
                         : <div className="flex h-full justify-center items-center"><p className="text-slate-400">Pilih file untuk dilihat atau diedit</p></div>
-                    ) : ( <ChatWindow chatHistory={project.chatHistory} /> )}
+                    ) : ( <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} /> )}
                 </div>
             </div>
             <div className="flex-shrink-0">

@@ -105,43 +105,21 @@ export const runAIAgentWorkflow = async (
     onThought: (thought: string) => void, // Callback for UI updates
 ): Promise<{ explanation: string; operations: FileOperation[] }> => {
     
-    const fileMap = new Map(files.map(f => [f.path, f.content]));
-
     const tools = [
         {
           type: "function",
           function: {
             name: "think",
-            description: "Records your internal monologue or plan for the user to see. Use this to outline your steps before reading files or applying changes. This helps the user understand your process.",
+            description: "Records your internal monologue or plan for the user to see. Use this to outline your steps before applying changes. This helps the user understand your process.",
             parameters: {
               type: "object",
               properties: {
                 thought: {
                   type: "string",
-                  description: "Your thought process or what you plan to do next, in Indonesian. E.g., 'Saya akan membaca semua file untuk memahami struktur proyek.'"
+                  description: "Your thought process or what you plan to do next, in Indonesian. E.g., 'Saya akan memperbarui index.html untuk menambahkan tombol baru.'"
                 }
               },
               required: ["thought"]
-            }
-          }
-        },
-        {
-          type: "function",
-          function: {
-            name: "read_file",
-            description: "Reads the full content of one or more files from the project to understand their contents. Provide a list of all paths you need to inspect.",
-            parameters: {
-              type: "object",
-              properties: {
-                paths: {
-                  type: "array",
-                  description: "An array of full file paths to read.",
-                  items: {
-                      type: "string"
-                  }
-                }
-              },
-              required: ["paths"]
             }
           }
         },
@@ -180,22 +158,25 @@ export const runAIAgentWorkflow = async (
     ];
     
     const stackDescription = getStackDescription(template, styleLibrary);
-    const fileList = files.length > 0 ? files.map(f => `\`${f.path}\``).join('\n') : 'No files exist yet.';
     
-    const systemPrompt = `You are an expert autonomous front-end developer AI. Your task is to achieve the user's goal by thinking, reading files, and then finally calling 'apply_project_changes' with the necessary code changes. The user is Indonesian, so your 'think' steps MUST be in Indonesian.
+    const fileContentsWithPaths = files.length > 0
+        ? files.map(f => `File: \`${f.path}\`\n\`\`\`\n${f.content}\n\`\`\``).join('\n\n---\n\n')
+        : 'No files exist yet. You are starting from a blank slate.';
+
+    const systemPrompt = `You are an expert autonomous front-end developer AI. Your task is to achieve the user's goal by thinking and then immediately calling 'apply_project_changes' with the necessary code changes. The user is Indonesian, so your 'think' steps MUST be in Indonesian.
 
 **PROJECT CONTEXT:**
 *   **Tech Stack:** The project is built using **${stackDescription}**.
-*   **Available Files:**\n${fileList}
+*   **Project Files & Content:** All project files and their complete contents are provided below. You have all the information you need.
+${fileContentsWithPaths}
 
-**YOUR WORKFLOW (EFFICIENT & DIRECT):**
-1.  **Initial Plan & Read:** Start by using the 'think' tool to briefly state your initial strategy in Indonesian. In the same turn, use the 'read_file' tool to read ALL files you need to inspect. This should be one single 'read_file' call for efficiency.
-2.  **Final Plan:** After you receive the file contents, use the 'think' tool one last time to outline your complete and final implementation plan.
-3.  **Apply Changes:** Immediately after stating your final plan, call 'apply_project_changes' with all the necessary code. This is your final action.
+**YOUR WORKFLOW (VERY IMPORTANT & STRICT):**
+1.  **Plan:** Use the 'think' tool to briefly state your implementation plan in Indonesian.
+2.  **Execute:** In the SAME turn, immediately call 'apply_project_changes' with all the necessary code.
 
 **CORE PRINCIPLES:**
-*   **BE EFFICIENT:** Avoid multiple 'think' calls back-to-back. Plan, read, finalize plan, then execute.
-*   **COMPLETE CODE:** When updating a file, you MUST provide the ENTIRE file content from start to finish.
+*   **DO NOT ask to read files.** You already have the full content of all files.
+*   **COMPLETE CODE:** When updating a file, you MUST provide the ENTIRE new file content from start to finish.
 *   **PRODUCTION QUALITY:** Write clean, efficient, and responsive code.`;
 
     const conversationHistory: ChatMessage[] = [
@@ -206,7 +187,7 @@ export const runAIAgentWorkflow = async (
     let loopCount = 0;
     while (true) {
         loopCount++;
-        if (loopCount > 20) { // Safety break to prevent accidental infinite loops
+        if (loopCount > 10) { // Safety break for simpler workflow
             throw new Error("AI agent exceeded maximum steps without finishing. Please try rephrasing your request.");
         }
 
@@ -252,22 +233,6 @@ export const runAIAgentWorkflow = async (
                     if (args.thought) {
                         onThought(args.thought);
                         result_content = `Tool \`think\` was called. Thought was recorded: "${args.thought}"`;
-                    }
-                } else if (call.name === 'read_file') {
-                    const paths = args.paths;
-                    if (Array.isArray(paths) && paths.length > 0) {
-                        onThought(`Membaca file: \`${paths.join('`, `')}\``);
-                        const contents = paths.map(path => {
-                            if (fileMap.has(path)) {
-                                return `Content of \`${path}\`:\n---\n${fileMap.get(path)}`;
-                            } else {
-                                onThought(`Mencoba membaca file yang tidak ada: \`${path}\``);
-                                return `Error: File not found: \`${path}\``;
-                            }
-                        });
-                        result_content = `Tool \`read_file\` was called. Here are the contents:\n\n${contents.join('\n\n')}`;
-                    } else {
-                         result_content = `Error: Tool \`read_file\` was called without a valid 'paths' array.`;
                     }
                 }
                 
