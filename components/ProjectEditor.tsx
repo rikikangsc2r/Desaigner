@@ -1,8 +1,9 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, ProjectFile, ChatMessage, FileOperation } from '../types';
 import { getProject, saveProject } from '../services/projectService';
-import { runAIAgentWorkflow, AIConversationalError } from '../services/aiService';
+import { streamAIAgentWorkflow } from '../services/aiService';
 import { createProjectZip, createPreviewHtml } from '../utils/fileUtils';
 import { BackIcon, CodeIcon, DownloadIcon, EyeIcon, SendIcon, UserIcon, BotIcon, EditIcon, RefreshIcon, MenuIcon, XIcon, CloudUploadIcon, SpinnerIcon, FilePlusIcon, FileEditIcon, FileMinusIcon, CheckCircleIcon, AlertTriangleIcon, InfoIcon } from './Icons';
 import { TypingIndicator } from './Loader';
@@ -17,6 +18,16 @@ interface ProjectEditorProps {
 
 type MobileView = 'files' | 'editor' | 'chat';
 type ToastType = { id: number; message: string; type: 'success' | 'error' | 'info' };
+
+type AiModel = 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5' | 'gpt-4o' | 'gpt-4o-mini' | 'o1-mini';
+const aiModels: { id: AiModel | string, name: string }[] = [
+    { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
+    { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
+    { id: 'gpt-5', name: 'GPT-5' },
+    { id: 'gpt-4o', name: 'GPT-4o' },
+    { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+    { id: 'o1-mini', name: 'o1 Mini' },
+];
 
 /**
  * Sends a signal to the preview window via localStorage to trigger a refresh.
@@ -119,7 +130,7 @@ const ChatWindow: React.FC<{ chatHistory: ChatMessage[], isLoading: boolean }> =
                         )}
                     </div>
                 ))}
-                {isLoading && <div className="flex items-start gap-3"><div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30"><BotIcon className="w-5 h-5 text-indigo-100" /></div><TypingIndicator/></div>}
+                {isLoading && chatHistory[chatHistory.length - 1]?.role !== 'assistant' && <div className="flex items-start gap-3"><div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0 mt-1 ring-1 ring-indigo-500/30"><BotIcon className="w-5 h-5 text-indigo-100" /></div><TypingIndicator/></div>}
                 <div ref={chatEndRef} />
             </div>
         </div>
@@ -143,7 +154,6 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [project, setProject] = useState<Project | null>(null);
   const [userInput, setUserInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [aiThoughts, setAiThoughts] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastType[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
@@ -156,6 +166,7 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
   const [publishedUrl, setPublishedUrl] = useState('');
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [funFactIndex, setFunFactIndex] = useState(0);
+  const [selectedModel, setSelectedModel] = useState<AiModel | string>('gpt-5-nano');
   const projectRef = useRef<Project | null>(null);
 
   useEffect(() => {
@@ -275,41 +286,75 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
 
     const userGoal = userInput;
     const originalTimestamp = project.updatedAt;
-    setUserInput('');
     setIsLoading(true);
-    setAiThoughts([]);
+    setError(null);
     
-    let workingProject = projectRef.current!;
-
-    const applyUpdate = (updater: (p: Project) => Project) => {
-        workingProject = updater(workingProject);
-        setProject(workingProject);
-    };
-
     const userMessage: ChatMessage = { role: 'user', content: userGoal };
-    applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, userMessage] }));
+    const assistantMessagePlaceholder: ChatMessage = { role: 'assistant', content: '' };
+    
+    const newHistory = [...project.chatHistory, userMessage, assistantMessagePlaceholder];
+    const projectWithUserMessage = { ...project, chatHistory: newHistory };
+    setProject(projectWithUserMessage);
+    projectRef.current = projectWithUserMessage;
+    
+    setUserInput('');
 
-    const handleNewThought = (thought: string) => {
-        setAiThoughts(prev => [...prev, thought]);
+    let responseBuffer = '';
+    let lastUiUpdate = 0;
+
+    const updateStreamingMessage = (content: string) => {
+        setProject(p => {
+            if (!p) return null;
+            const history = [...p.chatHistory];
+            const lastMsg = history[history.length - 1];
+            if (lastMsg?.role === 'assistant') {
+                lastMsg.content = content;
+            }
+            const newProj = { ...p, chatHistory: history };
+            projectRef.current = newProj;
+            return newProj;
+        });
     };
-
+    
     try {
-        const { explanation, operations } = await runAIAgentWorkflow(
+        await streamAIAgentWorkflow(
             userGoal, 
-            workingProject.files, 
-            workingProject.template, 
-            workingProject.styleLibrary,
-            handleNewThought
+            projectRef.current.files, 
+            projectRef.current.template, 
+            projectRef.current.styleLibrary,
+            selectedModel,
+            (chunk) => {
+                responseBuffer += chunk;
+                if (Date.now() - lastUiUpdate > 100) {
+                    updateStreamingMessage(responseBuffer + '▒');
+                    lastUiUpdate = Date.now();
+                }
+            },
+            (err) => {
+                setError(err.message);
+                updateStreamingMessage(`Sorry, an error occurred during streaming: ${err.message}`);
+            }
         );
+
+        updateStreamingMessage(responseBuffer);
         
-        const explanationMessage: ChatMessage = { role: 'assistant', content: explanation, operations };
-        applyUpdate(p => ({
-            ...p,
-            chatHistory: [...p.chatHistory, explanationMessage]
-        }));
+        let jsonString = responseBuffer;
+        if (jsonString.startsWith('```json')) {
+            jsonString = jsonString.slice(7);
+        }
+        if (jsonString.endsWith('```')) {
+            jsonString = jsonString.slice(0, -3);
+        }
+        jsonString = jsonString.trim();
+
+        if (!jsonString) {
+            throw new Error("AI returned an empty response.");
+        }
+
+        const { explanation, operations } = JSON.parse(jsonString) as { explanation: string; operations: FileOperation[] };
         
-        if (operations.length > 0) {
-            let currentFiles = workingProject.files;
+        let currentFiles = projectRef.current.files;
+        if (operations && operations.length > 0) {
             for (const op of operations) {
                 currentFiles = applyOperation(currentFiles, op);
                 
@@ -323,30 +368,40 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
                     setIsEditorDirty(false);
                 }
             }
-            
-            applyUpdate(p => ({
-                ...p,
-                files: currentFiles,
-                updatedAt: Date.now(),
-            }));
+        }
+        
+        const finalAssistantMessage: ChatMessage = {
+            role: 'assistant',
+            content: explanation,
+            operations,
+        };
+        
+        const finalProjectState = {
+            ...projectRef.current,
+            files: currentFiles,
+            updatedAt: Date.now(),
+            chatHistory: [
+                ...projectRef.current.chatHistory.slice(0, -1),
+                finalAssistantMessage,
+            ],
+        };
+        
+        setProject(finalProjectState);
+        projectRef.current = finalProjectState;
+        await saveProject(finalProjectState);
+
+        if (finalProjectState.updatedAt > originalTimestamp) {
+            signalPreviewUpdate(finalProjectState.id);
         }
     
     } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
-        showToast(`Failed to get AI response: ${errorMessage}`, 'error');
-        const finalMessage: ChatMessage = { role: 'assistant', content: `Sorry, an error occurred: ${errorMessage}` };
-        applyUpdate(p => ({ ...p, chatHistory: [...p.chatHistory, finalMessage] }));
+        showToast(`AI task failed: ${errorMessage}`, 'error');
+        updateStreamingMessage(`Sorry, an error occurred: ${errorMessage}\n\n**Raw Response:**\n\`\`\`\n${responseBuffer}\n\`\`\``);
     } finally {
         setIsLoading(false);
-        projectRef.current = workingProject;
-        if (projectRef.current) {
-            await saveProject(projectRef.current);
-            if (projectRef.current.updatedAt > originalTimestamp) {
-                signalPreviewUpdate(projectRef.current.id);
-            }
-        }
     }
-  }, [project, userInput, isEditorDirty, selectedFilePath, handleSaveFile, showToast]);
+  }, [project, userInput, isEditorDirty, selectedFilePath, handleSaveFile, showToast, selectedModel]);
 
   const handleNewChat = useCallback(async () => {
     if (!project || isLoading) return;
@@ -568,65 +623,57 @@ const ProjectEditor: React.FC<ProjectEditorProps> = ({ projectId, onBack }) => {
             <ChatWindow chatHistory={project.chatHistory} isLoading={isLoading} />
             <div className="flex flex-col gap-2">
                 {isLoading && (
-                    <div className="flex flex-col gap-3">
-                        <div className="p-3 bg-slate-900/30 rounded-lg border border-slate-700">
-                            <h4 className="text-sm font-semibold text-indigo-300 mb-2 flex items-center gap-2">
-                                <SpinnerIcon className="w-4 h-4" />
-                                AI is Working...
-                            </h4>
-                            {aiThoughts.length > 0 ? (
-                                <ul className="space-y-2 text-sm mt-3">
-                                    {aiThoughts.map((thought, index) => (
-                                        <li key={index} className="flex items-start gap-2.5">
-                                            {index < aiThoughts.length - 1 ? (
-                                                <CheckCircleIcon className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
-                                            ) : (
-                                                <SpinnerIcon className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
-                                            )}
-                                            <span className={`${index < aiThoughts.length - 1 ? 'text-slate-400' : 'text-slate-200'}`} dangerouslySetInnerHTML={{ __html: thought.replace(/`([^`]+)`/g, '<code class="bg-slate-800 rounded-sm px-1 font-mono text-xs">$1</code>') }}></span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : (
-                                <p className="text-sm text-slate-400 mt-2">Initializing... please wait.</p>
-                            )}
-                        </div>
-                        <div className="p-3 bg-slate-900/30 rounded-lg border border-slate-700 flex items-center gap-3 animate-fade-in">
-                           <InfoIcon className="w-5 h-5 text-slate-500 flex-shrink-0"/>
-                            <p key={funFactIndex} className="text-sm text-slate-400">
-                                {funFacts[funFactIndex]}
-                            </p>
-                        </div>
+                    <div className="p-3 bg-slate-900/30 rounded-lg border border-slate-700 flex items-center gap-3 animate-fade-in">
+                        <InfoIcon className="w-5 h-5 text-slate-500 flex-shrink-0"/>
+                        <p key={funFactIndex} className="text-sm text-slate-400">
+                            {funFacts[funFactIndex]}
+                        </p>
                     </div>
                 )}
-                <div className="flex gap-2 p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
-                    <textarea
-                        value={userInput}
-                        onChange={(e) => setUserInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
-                        placeholder="Describe your changes..."
-                        className="flex-1 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                        rows={2}
-                        disabled={isLoading}
-                    />
-                    <div className="flex flex-col gap-2">
-                        <button
-                            onClick={handleSendMessage}
-                            disabled={isLoading || !userInput.trim()}
-                            className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center"
-                            aria-label="Send message"
-                        >
-                            <SendIcon className="w-5 h-5" />
-                        </button>
-                         <button
-                            onClick={handleNewChat}
+                <div className="p-2 bg-slate-800/50 border border-slate-700 rounded-xl">
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                        <label htmlFor="ai-model-selector" className="text-xs font-medium text-slate-400">Model:</label>
+                        <select
+                            id="ai-model-selector"
+                            value={selectedModel}
+                            onChange={(e) => setSelectedModel(e.target.value)}
                             disabled={isLoading}
-                            className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center"
-                            aria-label="Start new chat"
-                            title="New Chat"
+                            className="flex-1 bg-slate-700 border border-slate-600 text-slate-100 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-60"
                         >
-                            <RefreshIcon className="w-5 h-5" />
-                        </button>
+                            {aiModels.map(model => (
+                                <option key={model.id} value={model.id}>{model.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex gap-2">
+                        <textarea
+                            value={userInput}
+                            onChange={(e) => setUserInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
+                            placeholder="Describe your changes..."
+                            className="flex-1 bg-slate-700/50 border border-slate-600 text-slate-100 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                            rows={2}
+                            disabled={isLoading}
+                        />
+                        <div className="flex flex-col gap-2">
+                            <button
+                                onClick={handleSendMessage}
+                                disabled={isLoading || !userInput.trim()}
+                                className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg disabled:from-slate-600 disabled:to-slate-600 disabled:cursor-not-allowed hover:from-indigo-600 hover:to-purple-700 transition-all flex-1 flex justify-center items-center"
+                                aria-label="Send message"
+                            >
+                                <SendIcon className="w-5 h-5" />
+                            </button>
+                            <button
+                                onClick={handleNewChat}
+                                disabled={isLoading}
+                                className="p-3 bg-slate-600 text-white rounded-lg disabled:bg-slate-700 disabled:cursor-not-allowed hover:bg-slate-500 transition-all flex-1 flex justify-center items-center"
+                                aria-label="Start new chat"
+                                title="New Chat"
+                            >
+                                <RefreshIcon className="w-5 h-5" />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
